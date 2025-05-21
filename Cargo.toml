@@ -1,0 +1,40 @@
+[package]
+name = "finch-mcp-stdio"
+version = "0.1.0"
+edition = "2021"
+description = "A tool for running MCP servers in STDIO mode using Finch"
+authors = ["Finch MCP Team"]
+license = "MIT"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35.1", features = ["full"] }
+
+# CLI argument parsing
+clap = { version = "4.4.18", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0.79"
+thiserror = "1.0.57"
+
+# Utilities
+console = "0.15.8"          # Terminal utilities
+indicatif = "0.17.8"        # Progress indicators
+log = "0.4.20"              # Logging
+env_logger = "0.11.0"       # Logging implementation
+serde = { version = "1.0.196", features = ["derive"] } # Serialization
+serde_json = "1.0.114"      # JSON handling
+
+[dev-dependencies]
+# Testing tools
+mockall = "0.12.1"          # Mocking for tests
+tempfile = "3.10.0"         # Temporary file handling
+test-context = "0.1.4"      # Test fixtures
+
+[[bin]]
+name = "finch-mcp-stdio"
+path = "src/main.rs"
+
+[lib]
+name = "finch_mcp_stdio"
+path = "src/lib.rs"

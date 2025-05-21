@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "finch-mcp",
-      "args": ["run", "test-mcp-filesystem:latest", "--stdio"],
-      "trusted": true
-    }
-  }
-}

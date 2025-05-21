@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "container-time": {
-      "command": "finch",
-      "args": ["run", "--name", "claude-time-server", "--rm", "-p", "3000:3000", "-e", "PORT=3000", "-e", "MCP_ENABLED=true", "test-mcp-time:latest"],
-      "trusted": true
-    }
-  }
-}
