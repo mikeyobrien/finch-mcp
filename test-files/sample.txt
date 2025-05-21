@@ -1,0 +1,3 @@
+This is a sample text file.
+It has multiple lines.
+We'll use it to test the filesystem MCP server.

@@ -1,0 +1,10 @@
+{
+  "name": "test-config",
+  "version": "1.0.0",
+  "description": "Sample configuration file",
+  "settings": {
+    "debug": true,
+    "logLevel": "info",
+    "maxRetries": 3
+  }
+}

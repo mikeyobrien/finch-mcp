@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "servers": {
+      "time": {
+        "command": "uvx",
+        "args": ["mcp-server-time", "--local-timezone", "America/Chicago"]
+      }
+    }
+  }
+}

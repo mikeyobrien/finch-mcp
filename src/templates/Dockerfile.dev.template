@@ -1,0 +1,22 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package*.json {{LOCKFILE}} ./
+
+# Install all dependencies (including dev dependencies)
+RUN {{INSTALL_COMMAND}}
+
+# The application code will be mounted as a volume
+# This is just a placeholder
+RUN mkdir -p src
+
+# Expose the MCP server port
+EXPOSE {{PORT}}
+
+# Set non-root user for security
+USER node
+
+# Start the MCP server with nodemon for live reloading
+CMD ["npx", "nodemon", "--watch", ".", "--ext", "js,ts,json", "{{ENTRY_POINT}}"]

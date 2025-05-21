@@ -1,0 +1,27 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+
+# Install dependencies, Python, and MCP time server
+RUN npm install --omit=dev && \
+    apk add --no-cache python3 py3-pip && \
+    pip3 install --break-system-packages mcp-server-time
+
+# Copy application code
+COPY . .
+
+# Expose the MCP server port
+EXPOSE {{PORT}}
+
+# Set non-root user for security
+USER node
+
+# If MCP_STDIO is set, run in STDIO mode, otherwise start HTTP server
+CMD if [ "$MCP_STDIO" = "true" ]; then \
+      python -m mcp_server_time --local-timezone America/Chicago; \
+    else \
+      node {{ENTRY_POINT}}; \
+    fi

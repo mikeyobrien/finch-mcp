@@ -1,0 +1,18 @@
+{
+  "name": "example-mcp-time",
+  "version": "1.0.0",
+  "description": "Example MCP time server for Finch-MCP",
+  "main": "index.js",
+  "scripts": {
+    "start": "uvx mcp-server-time --local-timezone America/Chicago"
+  },
+  "keywords": [
+    "mcp",
+    "time"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
