@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::process::Stdio;
 use tokio::process::Command;
 use log::{info, warn, debug};
+use console::style;
 
 /// Options for running a container in STDIO mode
 #[derive(Debug, Clone)]
@@ -14,6 +15,9 @@ pub struct StdioRunOptions {
     
     /// Volume mounts for the container
     pub volumes: Vec<String>,
+    
+    /// Use host network for the container
+    pub host_network: bool,
 }
 
 /// Client for interacting with Finch container CLI
@@ -172,6 +176,11 @@ impl FinchClient {
             cmd.arg("-v").arg(volume);
         }
         
+        // Add host network if enabled
+        if options.host_network {
+            cmd.arg("--network").arg("host");
+        }
+        
         // Add image name
         cmd.arg(&options.image_name);
         
@@ -192,6 +201,176 @@ impl FinchClient {
         } else {
             Err(anyhow::anyhow!("Container exited with non-zero status code: {}", status))
         }
+    }
+    
+    /// List finch-mcp containers and images
+    pub async fn list_resources(&self, show_all: bool) -> Result<()> {
+        println!("\n{} Finch-MCP Resources", style("📋").blue().bold());
+        println!("{}", "=".repeat(50));
+        
+        // List containers
+        println!("\n{} Containers:", style("🐳").cyan());
+        let container_args = if show_all {
+            vec!["ps", "-a", "--filter", "name=mcp-", "--format", "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
+        } else {
+            vec!["ps", "--filter", "name=mcp-", "--format", "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
+        };
+        
+        let container_output = Command::new("finch")
+            .args(&container_args)
+            .output()
+            .await?;
+            
+        if container_output.status.success() {
+            let output = String::from_utf8_lossy(&container_output.stdout);
+            if output.trim().is_empty() || !output.contains("mcp-") {
+                println!("  {}", style("No finch-mcp containers found").dim());
+            } else {
+                print!("{}", output);
+            }
+        } else {
+            println!("  {}", style("Error listing containers").red());
+        }
+        
+        // List images
+        println!("\n{} Images:", style("💿").green());
+        let image_output = Command::new("finch")
+            .args(["images", "--filter", "reference=mcp-*", "--format", "table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}"])
+            .output()
+            .await?;
+            
+        if image_output.status.success() {
+            let output = String::from_utf8_lossy(&image_output.stdout);
+            if output.trim().is_empty() || !output.contains("mcp-") {
+                println!("  {}", style("No finch-mcp images found").dim());
+            } else {
+                print!("{}", output);
+            }
+        } else {
+            println!("  {}", style("Error listing images").red());
+        }
+        
+        println!();
+        Ok(())
+    }
+    
+    /// Cleanup finch-mcp containers and images
+    pub async fn cleanup_resources(&self, cleanup_all: bool, cleanup_containers: bool, cleanup_images: bool, force: bool) -> Result<()> {
+        println!("\n{} Cleaning up Finch-MCP resources...", style("🧹").yellow().bold());
+        
+        let mut cleaned_something = false;
+        
+        // Cleanup containers
+        if cleanup_all || cleanup_containers {
+            println!("\n{} Removing containers...", style("🐳").cyan());
+            
+            // Get list of finch-mcp containers
+            let container_list = Command::new("finch")
+                .args(["ps", "-a", "--filter", "name=mcp-", "--format", "{{.Names}}"])
+                .output()
+                .await?;
+                
+            if container_list.status.success() {
+                let containers = String::from_utf8_lossy(&container_list.stdout);
+                let container_names: Vec<&str> = containers.lines().filter(|l| !l.trim().is_empty()).collect();
+                
+                if container_names.is_empty() {
+                    println!("  {}", style("No finch-mcp containers to remove").dim());
+                } else {
+                    if !force {
+                        println!("  Found {} containers to remove:", container_names.len());
+                        for name in &container_names {
+                            println!("    • {}", name);
+                        }
+                        print!("  Continue? [y/N]: ");
+                        use std::io::{self, Write};
+                        io::stdout().flush().unwrap();
+                        
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input).unwrap();
+                        
+                        if !input.trim().to_lowercase().starts_with('y') {
+                            println!("  Skipped container cleanup");
+                            return Ok(());
+                        }
+                    }
+                    
+                    for container in &container_names {
+                        let remove_result = Command::new("finch")
+                            .args(["rm", "-f", container])
+                            .output()
+                            .await?;
+                            
+                        if remove_result.status.success() {
+                            println!("  {} Removed container: {}", style("✓").green(), container);
+                            cleaned_something = true;
+                        } else {
+                            println!("  {} Failed to remove container: {}", style("✗").red(), container);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Cleanup images
+        if cleanup_all || cleanup_images {
+            println!("\n{} Removing images...", style("💿").green());
+            
+            // Get list of finch-mcp images
+            let image_list = Command::new("finch")
+                .args(["images", "--filter", "reference=mcp-*", "--format", "{{.Repository}}:{{.Tag}}"])
+                .output()
+                .await?;
+                
+            if image_list.status.success() {
+                let images = String::from_utf8_lossy(&image_list.stdout);
+                let image_names: Vec<&str> = images.lines().filter(|l| !l.trim().is_empty()).collect();
+                
+                if image_names.is_empty() {
+                    println!("  {}", style("No finch-mcp images to remove").dim());
+                } else {
+                    if !force {
+                        println!("  Found {} images to remove:", image_names.len());
+                        for name in &image_names {
+                            println!("    • {}", name);
+                        }
+                        print!("  Continue? [y/N]: ");
+                        use std::io::{self, Write};
+                        io::stdout().flush().unwrap();
+                        
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input).unwrap();
+                        
+                        if !input.trim().to_lowercase().starts_with('y') {
+                            println!("  Skipped image cleanup");
+                            return Ok(());
+                        }
+                    }
+                    
+                    for image in &image_names {
+                        let remove_result = Command::new("finch")
+                            .args(["rmi", "-f", image])
+                            .output()
+                            .await?;
+                            
+                        if remove_result.status.success() {
+                            println!("  {} Removed image: {}", style("✓").green(), image);
+                            cleaned_something = true;
+                        } else {
+                            println!("  {} Failed to remove image: {}", style("✗").red(), image);
+                        }
+                    }
+                }
+            }
+        }
+        
+        if cleaned_something {
+            println!("\n{} Cleanup completed!", style("✨").green().bold());
+        } else {
+            println!("\n{} Nothing to clean up", style("ℹ").blue());
+        }
+        
+        Ok(())
     }
 }
 

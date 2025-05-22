@@ -17,7 +17,7 @@ A specialized tool for running MCP (Model Context Protocol) servers in STDIO mod
 ## Prerequisites
 
 - [Finch](https://runfinch.com/) (for container management)
-  - **First-time users**: finch-mcp-stdio will automatically run `finch vm init` if needed
+  - **First-time users**: finch-mcp will automatically run `finch vm init` if needed
   - **Manual setup**: You can also run `finch vm init` manually if you prefer
 - Either:
   - An MCP server image with STDIO mode support, OR

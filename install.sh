@@ -1,11 +1,11 @@
 #!/bin/bash
 set -e
 
-# finch-mcp-stdio installer script
+# finch-mcp installer script
 # Usage: curl -sSL https://raw.githubusercontent.com/mikeyobrien/finch-mcp/main/install.sh | bash
 
 REPO="mikeyobrien/finch-mcp"
-BINARY_NAME="finch-mcp-stdio"
+BINARY_NAME="finch-mcp"
 
 # Detect OS and architecture
 OS="$(uname -s)"
@@ -36,7 +36,7 @@ case "$OS" in
     "MINGW"*|"MSYS"*|"CYGWIN"*)
         PLATFORM="windows-x86_64.exe"
         EXTENSION="zip"
-        BINARY_NAME="finch-mcp-stdio.exe"
+        BINARY_NAME="finch-mcp.exe"
         ;;
     *)
         echo "Unsupported OS: $OS"
@@ -66,9 +66,9 @@ cd "$TMP_DIR"
 
 # Download the binary
 if command -v curl >/dev/null 2>&1; then
-    curl -sL "$DOWNLOAD_URL" -o "finch-mcp-stdio.${EXTENSION}"
+    curl -sL "$DOWNLOAD_URL" -o "finch-mcp.${EXTENSION}"
 elif command -v wget >/dev/null 2>&1; then
-    wget -q "$DOWNLOAD_URL" -O "finch-mcp-stdio.${EXTENSION}"
+    wget -q "$DOWNLOAD_URL" -O "finch-mcp.${EXTENSION}"
 else
     echo "❌ Neither curl nor wget found. Please install one of them."
     exit 1
@@ -77,9 +77,9 @@ fi
 # Extract the binary
 echo "📂 Extracting binary..."
 if [ "$EXTENSION" = "tar.gz" ]; then
-    tar -xzf "finch-mcp-stdio.${EXTENSION}"
+    tar -xzf "finch-mcp.${EXTENSION}"
 elif [ "$EXTENSION" = "zip" ]; then
-    unzip -q "finch-mcp-stdio.${EXTENSION}"
+    unzip -q "finch-mcp.${EXTENSION}"
 fi
 
 # Make binary executable (Unix systems)
@@ -118,11 +118,11 @@ cd ..
 rm -rf "$TMP_DIR"
 
 echo ""
-echo "🎉 finch-mcp-stdio $LATEST_TAG installed successfully!"
+echo "🎉 finch-mcp $LATEST_TAG installed successfully!"
 echo ""
 echo "Usage examples:"
-echo "  finch-mcp-stdio uvx mcp-server-time"
-echo "  finch-mcp-stdio ./my-project"
-echo "  finch-mcp-stdio https://github.com/user/mcp-repo"
+echo "  finch-mcp uvx mcp-server-time"
+echo "  finch-mcp ./my-project"
+echo "  finch-mcp https://github.com/user/mcp-repo"
 echo ""
 echo "For more information, visit: https://github.com/$REPO"

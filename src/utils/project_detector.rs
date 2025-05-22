@@ -177,10 +177,12 @@ fn detect_nodejs_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             });
         
         // Check for Node.js version requirement
-        let node_version = package_json.get("engines")
+        let raw_node_version = package_json.get("engines")
             .and_then(|engines| engines.get("node"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+            .and_then(|v| v.as_str());
+        
+        let node_version = raw_node_version
+            .map(|s| normalize_node_version(s))
             .or_else(|| Some("20".to_string())); // Default to Node 20
         
         return Ok(Some(ProjectInfo {
@@ -388,6 +390,90 @@ fn detect_package_manager(repo_path: &Path) -> Result<Option<String>> {
     Ok(None)
 }
 
+/// Normalize Node.js version strings to valid Docker tag format
+/// Converts version ranges like ">=20", "^18.0.0", "~16.14" to specific versions
+fn normalize_node_version(version_str: &str) -> String {
+    let version = version_str.trim();
+    
+    // Remove common version range operators and extract the base version
+    let normalized = if version.starts_with(">=") {
+        // >=18 -> 18, >=18.0.0 -> 18
+        let base_version = &version[2..];
+        extract_major_version(base_version)
+    } else if version.starts_with("^") {
+        // ^18.0.0 -> 18
+        let base_version = &version[1..];
+        extract_major_version(base_version)
+    } else if version.starts_with("~") {
+        // ~18.14 -> 18 
+        let base_version = &version[1..];
+        extract_major_version(base_version)
+    } else if version.starts_with("=") {
+        // =18.0.0 -> 18
+        let base_version = &version[1..];
+        extract_major_version(base_version)
+    } else if version.contains(" || ") {
+        // ">=16 || >=18" -> take the first range and normalize it
+        let first_range = version.split(" || ").next().unwrap_or(version);
+        return normalize_node_version(first_range);
+    } else if version.contains(" - ") {
+        // "16.0.0 - 18.0.0" -> use the lower bound
+        let lower_bound = version.split(" - ").next().unwrap_or(version);
+        extract_major_version(lower_bound)
+    } else if version.contains("-") && !version.starts_with('-') {
+        // Handle ranges like "16-18" -> use first number
+        let first_part = version.split('-').next().unwrap_or(version);
+        extract_major_version(first_part)
+    } else {
+        // Already a clean version like "18" or "18.0.0"
+        extract_major_version(version)
+    };
+    
+    // Validate that we have a reasonable Node.js version
+    if let Ok(major_version) = normalized.parse::<u32>() {
+        // Node.js major versions typically range from 14-22 (as of 2024)
+        // If it's within reasonable bounds, use it; otherwise default to 20
+        if major_version >= 14 && major_version <= 30 {
+            major_version.to_string()
+        } else {
+            "20".to_string()
+        }
+    } else {
+        // If parsing fails, default to Node 20
+        "20".to_string()
+    }
+}
+
+/// Extract major version number from a version string
+fn extract_major_version(version: &str) -> String {
+    let cleaned = version.trim();
+    
+    // Handle empty or whitespace-only strings
+    if cleaned.is_empty() {
+        return "20".to_string();
+    }
+    
+    // Split by dot and take the first part (major version)
+    let major_part = cleaned.split('.').next().unwrap_or(cleaned);
+    
+    // Remove any non-numeric characters from the end
+    let mut major_version = String::new();
+    for ch in major_part.chars() {
+        if ch.is_ascii_digit() {
+            major_version.push(ch);
+        } else {
+            break; // Stop at first non-digit
+        }
+    }
+    
+    // Return the major version or default to 20
+    if major_version.is_empty() {
+        "20".to_string()
+    } else {
+        major_version
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +526,75 @@ test-server = "test_mcp_server:main"
         assert_eq!(project_info.project_type, ProjectType::NodeJs);
         assert_eq!(project_info.name, Some("test-mcp-server".to_string()));
         assert_eq!(project_info.entry_point, Some("./bin/server.js".to_string()));
+    }
+    
+    #[test]
+    fn test_normalize_node_version() {
+        // Test range operators
+        assert_eq!(normalize_node_version(">=20"), "20");
+        assert_eq!(normalize_node_version(">=18.0.0"), "18");
+        assert_eq!(normalize_node_version("^18.0.0"), "18");
+        assert_eq!(normalize_node_version("~16.14"), "16");
+        assert_eq!(normalize_node_version("=18.0.0"), "18");
+        
+        // Test exact versions
+        assert_eq!(normalize_node_version("20"), "20");
+        assert_eq!(normalize_node_version("18.0.0"), "18");
+        assert_eq!(normalize_node_version("16.14.2"), "16");
+        
+        // Test complex ranges
+        assert_eq!(normalize_node_version(">=16 || >=18"), "16");
+        assert_eq!(normalize_node_version("16.0.0 - 18.0.0"), "16");
+        assert_eq!(normalize_node_version("16-18"), "16");
+        
+        // Test edge cases
+        assert_eq!(normalize_node_version(""), "20");
+        assert_eq!(normalize_node_version("   "), "20");
+        assert_eq!(normalize_node_version("invalid"), "20");
+        assert_eq!(normalize_node_version("abc"), "20");
+        
+        // Test out of range versions (should default to 20)
+        assert_eq!(normalize_node_version(">=50"), "20");
+        assert_eq!(normalize_node_version("5"), "20");
+        
+        // Test edge of valid range
+        assert_eq!(normalize_node_version("14"), "14");
+        assert_eq!(normalize_node_version("22"), "22");
+    }
+    
+    #[test] 
+    fn test_extract_major_version() {
+        assert_eq!(extract_major_version("18.0.0"), "18");
+        assert_eq!(extract_major_version("20"), "20");
+        assert_eq!(extract_major_version("16.14.2"), "16");
+        assert_eq!(extract_major_version("18x"), "18");
+        assert_eq!(extract_major_version("20.1.0-alpha"), "20");
+        assert_eq!(extract_major_version(""), "20");
+        assert_eq!(extract_major_version("abc"), "20");
+    }
+    
+    #[test]
+    fn test_nodejs_project_with_engine_versions() {
+        let temp_dir = TempDir::new().unwrap();
+        
+        // Test with range version
+        let package_json_content = r#"
+{
+  "name": "test-server",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
+"#;
+        
+        fs::write(temp_dir.path().join("package.json"), package_json_content).unwrap();
+        
+        let project_info = detect_project_type(temp_dir.path()).unwrap();
+        assert_eq!(project_info.project_type, ProjectType::NodeJs);
+        assert_eq!(project_info.node_version, Some("18".to_string()));
     }
 }

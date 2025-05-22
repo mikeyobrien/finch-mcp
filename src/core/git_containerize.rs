@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use anyhow::{Context, Result};
 use log::{debug, info};
 use tempfile::TempDir;
@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::utils::git_repository::GitRepository;
 use crate::utils::project_detector::{detect_project_type, ProjectType, ProjectInfo};
+use crate::utils::progress::run_build_with_progress;
 use crate::finch::client::{FinchClient, StdioRunOptions};
 
 pub struct GitContainerizeOptions {
@@ -15,6 +16,8 @@ pub struct GitContainerizeOptions {
     pub args: Vec<String>,
     pub env_vars: Vec<String>,
     pub volumes: Vec<String>,
+    pub host_network: bool,
+    pub forward_registry: bool,
 }
 
 pub struct LocalContainerizeOptions {
@@ -22,12 +25,17 @@ pub struct LocalContainerizeOptions {
     pub args: Vec<String>,
     pub env_vars: Vec<String>,
     pub volumes: Vec<String>,
+    pub host_network: bool,
+    pub forward_registry: bool,
 }
 
 pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result<()> {
+    use console::style;
+    
     // Parse and clone the repository
     let mut git_repo = GitRepository::new(&options.repo_url);
     
+    println!("\n{} Cloning repository...", style("📦").blue());
     info!("Cloning repository: {}", git_repo.url);
     let repo_path = git_repo.clone_to_temp().await?;
     
@@ -47,7 +55,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
     debug!("Generated Dockerfile:\n{}", dockerfile_content);
     
     // Write Dockerfile
@@ -64,21 +72,31 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     // Copy Dockerfile to build context
     fs::copy(&dockerfile_path, build_context.join("Dockerfile"))?;
     
-    // Build the container image
-    info!("Building container image: {}", image_name);
-    let build_status = Command::new("finch")
+    // Build the container image with progress tracking
+    let project_type_str = match project_info.project_type {
+        ProjectType::NodeJs | ProjectType::NodeJsMonorepo => "Node.js",
+        ProjectType::PythonPoetry => "Python (Poetry)",
+        ProjectType::PythonUv => "Python (uv)",
+        ProjectType::PythonSetupPy => "Python (setup.py)",
+        ProjectType::PythonRequirements => "Python (requirements.txt)",
+        ProjectType::Rust => "Rust",
+        ProjectType::Unknown => "Unknown",
+    };
+    
+    let mut build_command = Command::new("finch");
+    build_command
         .arg("build")
         .arg("-t")
-        .arg(&image_name)
-        .arg(&build_context)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .context("Failed to execute finch build command")?;
+        .arg(&image_name);
     
-    if !build_status.success() {
-        return Err(anyhow::anyhow!("Container build failed with status: {}", build_status));
+    // Add host network option if enabled
+    if options.host_network {
+        build_command.arg("--network").arg("host");
     }
+    
+    build_command.arg(&build_context);
+    
+    run_build_with_progress(&mut build_command, &image_name, project_type_str)?;
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;
@@ -92,18 +110,22 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     }
     
     // Run the container
+    println!("{} Starting server...\n", style("🚀").green());
     info!("Running containerized git repository");
     let finch_client = FinchClient::new();
     let run_options = StdioRunOptions {
         image_name,
         env_vars,
         volumes: options.volumes,
+        host_network: options.host_network,
     };
     
     finch_client.run_stdio_container(&run_options).await
 }
 
 pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Result<()> {
+    use console::style;
+    
     let local_path = PathBuf::from(&options.local_path);
     
     // Validate that the path exists and is a directory
@@ -115,6 +137,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         return Err(anyhow::anyhow!("Path is not a directory: {}", options.local_path));
     }
     
+    println!("\n{} Analyzing project...", style("🔍").blue());
     info!("Containerizing local directory: {}", local_path.display());
     
     // Detect the project type
@@ -133,7 +156,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
     debug!("Generated Dockerfile:\n{}", dockerfile_content);
     
     // Write Dockerfile
@@ -150,21 +173,31 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     // Copy Dockerfile to build context
     fs::copy(&dockerfile_path, build_context.join("Dockerfile"))?;
     
-    // Build the container image
-    info!("Building container image: {}", image_name);
-    let build_status = Command::new("finch")
+    // Build the container image with progress tracking
+    let project_type_str = match project_info.project_type {
+        ProjectType::NodeJs | ProjectType::NodeJsMonorepo => "Node.js",
+        ProjectType::PythonPoetry => "Python (Poetry)",
+        ProjectType::PythonUv => "Python (uv)",
+        ProjectType::PythonSetupPy => "Python (setup.py)",
+        ProjectType::PythonRequirements => "Python (requirements.txt)",
+        ProjectType::Rust => "Rust",
+        ProjectType::Unknown => "Unknown",
+    };
+    
+    let mut build_command = Command::new("finch");
+    build_command
         .arg("build")
         .arg("-t")
-        .arg(&image_name)
-        .arg(&build_context)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .context("Failed to execute finch build command")?;
+        .arg(&image_name);
     
-    if !build_status.success() {
-        return Err(anyhow::anyhow!("Container build failed with status: {}", build_status));
+    // Add host network option if enabled
+    if options.host_network {
+        build_command.arg("--network").arg("host");
     }
+    
+    build_command.arg(&build_context);
+    
+    run_build_with_progress(&mut build_command, &image_name, project_type_str)?;
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;
@@ -178,18 +211,76 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     }
     
     // Run the container
+    println!("{} Starting server...\n", style("🚀").green());
     info!("Running containerized local directory");
     let finch_client = FinchClient::new();
     let run_options = StdioRunOptions {
         image_name,
         env_vars,
         volumes: options.volumes,
+        host_network: options.host_network,
     };
     
     finch_client.run_stdio_container(&run_options).await
 }
 
-fn generate_dockerfile_for_project(project_info: &ProjectInfo, args: &[String]) -> Result<String> {
+fn get_registry_config(forward_registry: bool, project_type: &ProjectType) -> Vec<String> {
+    if !forward_registry {
+        return Vec::new();
+    }
+    
+    let mut config_lines = Vec::new();
+    
+    match project_type {
+        ProjectType::NodeJs | ProjectType::NodeJsMonorepo => {
+            // Check for .npmrc in home directory
+            if let Ok(home) = std::env::var("HOME") {
+                let npmrc_path = format!("{}/.npmrc", home);
+                if std::path::Path::new(&npmrc_path).exists() {
+                    config_lines.push(format!("COPY --from=host {} /root/.npmrc", npmrc_path));
+                }
+            }
+            
+            // Forward common npm registry environment variables
+            if let Ok(registry) = std::env::var("NPM_CONFIG_REGISTRY") {
+                config_lines.push(format!("ENV NPM_CONFIG_REGISTRY={}", registry));
+            }
+            if let Ok(token) = std::env::var("NPM_TOKEN") {
+                config_lines.push(format!("ENV NPM_TOKEN={}", token));
+            }
+        }
+        
+        ProjectType::PythonPoetry | ProjectType::PythonUv | 
+        ProjectType::PythonSetupPy | ProjectType::PythonRequirements => {
+            // Check for pip.conf
+            if let Ok(home) = std::env::var("HOME") {
+                let pip_conf_path = format!("{}/.pip/pip.conf", home);
+                if std::path::Path::new(&pip_conf_path).exists() {
+                    config_lines.push(format!("COPY --from=host {} /root/.pip/pip.conf", pip_conf_path));
+                }
+            }
+            
+            // Forward common pip registry environment variables
+            if let Ok(index_url) = std::env::var("PIP_INDEX_URL") {
+                config_lines.push(format!("ENV PIP_INDEX_URL={}", index_url));
+            }
+            if let Ok(extra_index_url) = std::env::var("PIP_EXTRA_INDEX_URL") {
+                config_lines.push(format!("ENV PIP_EXTRA_INDEX_URL={}", extra_index_url));
+            }
+            if let Ok(trusted_host) = std::env::var("PIP_TRUSTED_HOST") {
+                config_lines.push(format!("ENV PIP_TRUSTED_HOST={}", trusted_host));
+            }
+        }
+        
+        _ => {}
+    }
+    
+    config_lines
+}
+
+fn generate_dockerfile_for_project(project_info: &ProjectInfo, args: &[String], forward_registry: bool) -> Result<String> {
+    let registry_config = get_registry_config(forward_registry, &project_info.project_type);
+    
     match project_info.project_type {
         ProjectType::PythonPoetry => {
             let python_version = project_info.python_version.as_deref().unwrap_or("3.11");
@@ -201,11 +292,17 @@ fn generate_dockerfile_for_project(project_info: &ProjectInfo, args: &[String]) 
                 "poetry run python -m src".to_string()
             };
             
+            let registry_section = if registry_config.is_empty() {
+                String::new()
+            } else {
+                format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
+            };
+            
             Ok(format!(
                 r#"FROM python:{}-slim
 
 WORKDIR /app
-
+{registry_section}
 # Install poetry
 RUN pip install poetry
 
@@ -226,7 +323,8 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 python_version,
-                entry_command
+                entry_command,
+                registry_section = registry_section
             ))
         }
         
@@ -240,11 +338,17 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 "python -m src".to_string()
             };
             
+            let registry_section = if registry_config.is_empty() {
+                String::new()
+            } else {
+                format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
+            };
+            
             Ok(format!(
                 r#"FROM python:{}-slim
 
 WORKDIR /app
-
+{registry_section}
 # Install uv
 RUN pip install uv
 
@@ -262,7 +366,8 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 python_version,
-                entry_command
+                entry_command,
+                registry_section = registry_section
             ))
         }
         
@@ -274,11 +379,17 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 "python setup.py".to_string()
             };
             
+            let registry_section = if registry_config.is_empty() {
+                String::new()
+            } else {
+                format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
+            };
+            
             Ok(format!(
                 r#"FROM python:{}-slim
 
 WORKDIR /app
-
+{registry_section}
 # Copy project files
 COPY . .
 
@@ -293,7 +404,8 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 python_version,
-                entry_command
+                entry_command,
+                registry_section = registry_section
             ))
         }
         
@@ -305,11 +417,17 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 "python main.py".to_string()
             };
             
+            let registry_section = if registry_config.is_empty() {
+                String::new()
+            } else {
+                format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
+            };
+            
             Ok(format!(
                 r#"FROM python:{}-slim
 
 WORKDIR /app
-
+{registry_section}
 # Copy project files
 COPY . .
 
@@ -324,7 +442,8 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 python_version,
-                entry_command
+                entry_command,
+                registry_section = registry_section
             ))
         }
         
@@ -340,11 +459,17 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 "npm start".to_string()
             };
             
+            let registry_section = if registry_config.is_empty() {
+                String::new()
+            } else {
+                format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
+            };
+            
             Ok(format!(
                 r#"FROM node:{}-slim
 
 WORKDIR /app
-
+{registry_section}
 # Copy project files
 COPY . .
 
@@ -359,7 +484,8 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 node_version,
-                entry_command
+                entry_command,
+                registry_section = registry_section
             ))
         }
         
@@ -394,31 +520,38 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 _ => "",
             };
             
+            let registry_section = if registry_config.is_empty() {
+                String::new()
+            } else {
+                format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
+            };
+            
             Ok(format!(
-                r#"FROM node:{}-slim
+                r#"FROM node:{node_version}-slim
 
 WORKDIR /app
-
+{registry_section}
 # Install package manager if needed
-{}
+{pm_install}
 
 # Copy project files
 COPY . .
 
 # Install dependencies
-RUN {}
+RUN {install_command}
 
 # Set environment variables for MCP
 ENV MCP_ENABLED=true
 ENV MCP_STDIO=true
 
 # Run the application
-CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
+CMD ["sh", "-c", "{entry_command} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
-                node_version,
-                pm_install,
-                install_command,
-                entry_command
+                node_version = node_version,
+                registry_section = registry_section,
+                pm_install = pm_install,
+                install_command = install_command,
+                entry_command = entry_command
             ))
         }
         
@@ -483,7 +616,7 @@ mod tests {
             package_manager: None,
         };
         
-        let dockerfile = generate_dockerfile_for_project(&project_info, &[]).unwrap();
+        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
         assert!(dockerfile.contains("FROM python:3.11-slim"));
         assert!(dockerfile.contains("RUN pip install poetry"));
         assert!(dockerfile.contains("poetry run test-server"));
@@ -503,7 +636,7 @@ mod tests {
             package_manager: None,
         };
         
-        let dockerfile = generate_dockerfile_for_project(&project_info, &[]).unwrap();
+        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
         assert!(dockerfile.contains("FROM node:20-slim"));
         assert!(dockerfile.contains("RUN npm install"));
         assert!(dockerfile.contains("node index.js"));

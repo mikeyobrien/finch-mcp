@@ -76,12 +76,12 @@ jobs:
       if: matrix.os != 'windows-latest'
       uses: actions/upload-artifact@v4
       with:
-        name: finch-mcp-stdio-${{ matrix.os }}
-        path: target/release/finch-mcp-stdio
+        name: finch-mcp-${{ matrix.os }}
+        path: target/release/finch-mcp
 
     - name: Upload binary (Windows)
       if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v4
       with:
-        name: finch-mcp-stdio-${{ matrix.os }}
-        path: target/release/finch-mcp-stdio.exe
+        name: finch-mcp-${{ matrix.os }}
+        path: target/release/finch-mcp.exe

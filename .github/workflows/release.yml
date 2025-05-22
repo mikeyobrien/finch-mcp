@@ -19,28 +19,28 @@ jobs:
           # macOS
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact_name: finch-mcp-stdio
-            asset_name: finch-mcp-stdio-macos-x86_64
+            artifact_name: finch-mcp
+            asset_name: finch-mcp-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact_name: finch-mcp-stdio
-            asset_name: finch-mcp-stdio-macos-aarch64
+            artifact_name: finch-mcp
+            asset_name: finch-mcp-macos-aarch64
           
           # Linux
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact_name: finch-mcp-stdio
-            asset_name: finch-mcp-stdio-linux-x86_64
+            artifact_name: finch-mcp
+            asset_name: finch-mcp-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact_name: finch-mcp-stdio
-            asset_name: finch-mcp-stdio-linux-aarch64
+            artifact_name: finch-mcp
+            asset_name: finch-mcp-linux-aarch64
           
           # Windows
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact_name: finch-mcp-stdio.exe
-            asset_name: finch-mcp-stdio-windows-x86_64.exe
+            artifact_name: finch-mcp.exe
+            asset_name: finch-mcp-windows-x86_64.exe
 
     steps:
     - name: Checkout code
@@ -119,39 +119,45 @@ jobs:
       id: release_notes
       run: |
         cat > release_notes.md << 'EOF'
-        ## 🚀 finch-mcp-stdio ${{ steps.version.outputs.VERSION }}
+        ## 🚀 finch-mcp ${{ steps.version.outputs.VERSION }}
         
         Pre-built binaries for multiple platforms. Download the appropriate binary for your system:
         
         ### macOS
-        - **Intel Macs**: `finch-mcp-stdio-macos-x86_64.tar.gz`
-        - **Apple Silicon (M1/M2/M3)**: `finch-mcp-stdio-macos-aarch64.tar.gz`
+        - **Intel Macs**: `finch-mcp-macos-x86_64.tar.gz`
+        - **Apple Silicon (M1/M2/M3)**: `finch-mcp-macos-aarch64.tar.gz`
         
         ### Linux
-        - **x86_64**: `finch-mcp-stdio-linux-x86_64.tar.gz`
-        - **ARM64**: `finch-mcp-stdio-linux-aarch64.tar.gz`
+        - **x86_64**: `finch-mcp-linux-x86_64.tar.gz`
+        - **ARM64**: `finch-mcp-linux-aarch64.tar.gz`
         
         ### Windows
-        - **x86_64**: `finch-mcp-stdio-windows-x86_64.exe.zip`
+        - **x86_64**: `finch-mcp-windows-x86_64.exe.zip`
         
         ### Installation
         
         1. Download the appropriate binary for your platform
         2. Extract the archive (tar.gz for Unix, zip for Windows)
         3. Move the binary to a directory in your PATH
-        4. Make it executable (Unix): `chmod +x finch-mcp-stdio`
+        4. Make it executable (Unix): `chmod +x finch-mcp`
         
         ### Usage
         
         ```bash
-        # Run an MCP server command
-        finch-mcp-stdio uvx mcp-server-time
+        # Run an MCP server from git repository
+        finch-mcp git https://github.com/user/mcp-repo
         
-        # Run from local directory
-        finch-mcp-stdio ./my-mcp-project
+        # Run an MCP server from local directory
+        finch-mcp local ./my-mcp-project
         
-        # Run from git repository
-        finch-mcp-stdio https://github.com/user/mcp-repo
+        # Auto-containerize and run a command
+        finch-mcp auto uvx mcp-server-time
+        
+        # List running containers
+        finch-mcp list
+        
+        # Cleanup containers and images
+        finch-mcp cleanup
         ```
         
         ### Features
@@ -163,6 +169,8 @@ jobs:
         - 🐍 Python projects (Poetry, UV, pip)
         - 📦 Node.js projects (including TypeScript)
         - 🔧 Environment variables and volume mounting
+        - 🌐 Registry forwarding for corporate networks
+        - 🔗 Host network access for package registries
         
         For more information, see the [README](https://github.com/mikeyobrien/finch-mcp/blob/main/README.md).
         EOF
@@ -171,7 +179,7 @@ jobs:
       uses: ncipollo/release-action@v1
       with:
         tag: ${{ steps.version.outputs.VERSION }}
-        name: finch-mcp-stdio ${{ steps.version.outputs.VERSION }}
+        name: finch-mcp ${{ steps.version.outputs.VERSION }}
         bodyFile: release_notes.md
         draft: false
         prerelease: false

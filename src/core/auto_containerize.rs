@@ -13,6 +13,8 @@ pub struct AutoContainerizeOptions {
     pub args: Vec<String>,
     pub env_vars: Vec<String>,
     pub volumes: Vec<String>,
+    pub host_network: bool,
+    pub forward_registry: bool,
 }
 
 pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Result<()> {
@@ -37,13 +39,23 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
     
     // Build the container image
     info!("Building container image: {}", image_name);
-    let build_status = Command::new("finch")
+    let mut build_command = Command::new("finch");
+    build_command
         .arg("build")
         .arg("-t")
-        .arg(&image_name)
+        .arg(&image_name);
+    
+    // Add host network option if enabled
+    if options.host_network {
+        build_command.arg("--network").arg("host");
+    }
+    
+    build_command
         .arg("-f")
         .arg(&dockerfile_path)
-        .arg(temp_dir.path())
+        .arg(temp_dir.path());
+    
+    let build_status = build_command
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
@@ -75,6 +87,7 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
         image_name,
         env_vars,
         volumes: options.volumes,
+        host_network: options.host_network,
     };
     
     finch_client.run_stdio_container(&run_options).await
@@ -83,7 +96,6 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
     
     // These tests would require finch installed to run
     // so we'll mark them as ignore for automated testing
@@ -96,6 +108,8 @@ mod tests {
             args: vec!["mcp-server-time".to_string(), "--local-timezone".to_string(), "UTC".to_string()],
             env_vars: vec![],
             volumes: vec![],
+            host_network: false,
+            forward_registry: false,
         };
         
         let result = auto_containerize_and_run(options).await;

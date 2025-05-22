@@ -72,6 +72,7 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
         image_name: options.image_name,
         env_vars: options.env_vars.unwrap_or_default(),
         volumes: options.volumes.unwrap_or_default(),
+        host_network: false, // Default to false for run command
     };
 
     // Setup signal handler for ctrl+c

@@ -1,4 +1,4 @@
-use finch_mcp_stdio::{
+use finch_mcp::{
     FinchClient,
     StdioRunOptions,
     DockerfileOptions,
@@ -6,7 +6,6 @@ use finch_mcp_stdio::{
 };
 use tempfile::TempDir;
 use std::fs;
-// Path import removed
 
 // This test verifies that the Dockerfile template generator works correctly
 #[test]
@@ -59,6 +58,7 @@ async fn test_finch_client_integration() {
         image_name: "hello-world".to_string(),
         env_vars: vec!["TEST=value".to_string()],
         volumes: vec![],
+        host_network: false,
     };
     
     // This should succeed but we'll ignore errors
@@ -71,23 +71,24 @@ async fn test_finch_client_integration() {
 #[test]
 fn test_cli_parsing() {
     use clap::CommandFactory;
-    use finch_mcp_stdio::cli::Cli;
+    use finch_mcp::cli::Cli;
     
     // Verify our CLI definition is valid
     Cli::command().debug_assert();
     
-    // Test that CLI parse logic works for required arguments
+    // Test that CLI parse logic works for required subcommand arguments
     let matches = Cli::command()
-        .get_matches_from(vec!["finch-mcp-stdio", "my-image:latest"]);
+        .get_matches_from(vec!["finch-mcp", "run", "my-image:latest"]);
     
-    assert!(matches.contains_id("image"));
+    // Verify the command parsed correctly
+    assert!(matches.subcommand_matches("run").is_some());
 }
 
 // Test verifies that our run_stdio_container function works correctly
 // with various options combinations
 #[test]
 fn test_run_options_creation() {
-    use finch_mcp_stdio::RunOptions;
+    use finch_mcp::RunOptions;
     
     // Test with minimal options
     let options = RunOptions {

@@ -1,8 +1,8 @@
 [package]
-name = "finch-mcp-stdio"
+name = "finch-mcp"
 version = "0.1.0"
 edition = "2021"
-description = "A tool for running MCP servers in STDIO mode using Finch"
+description = "A tool for running MCP servers using Finch containers"
 authors = ["Finch MCP Team"]
 license = "MIT"
 
@@ -34,9 +34,9 @@ tempfile = "3.10.0"         # Temporary file handling
 test-context = "0.1.4"      # Test fixtures
 
 [[bin]]
-name = "finch-mcp-stdio"
+name = "finch-mcp"
 path = "src/main.rs"
 
 [lib]
-name = "finch_mcp_stdio"
+name = "finch_mcp"
 path = "src/lib.rs"

@@ -1,4 +1,4 @@
-use clap::{Parser, ArgAction};
+use clap::{Parser, Subcommand, ArgAction};
 use log::debug;
 use std::path::Path;
 
@@ -7,36 +7,77 @@ use crate::core::auto_containerize::AutoContainerizeOptions;
 use crate::core::git_containerize::{GitContainerizeOptions, LocalContainerizeOptions};
 use crate::utils::git_repository::GitRepository;
 
-/// Finch-MCP STDIO - Tool for running MCP servers in STDIO mode with Finch
+/// Finch-MCP - Tool for running MCP servers using Finch containers
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 #[command(disable_version_flag(true))]
 pub struct Cli {
-    /// MCP server image, command, git repository URL, or local directory to run
-    #[arg(required = true)]
-    pub command: String,
-    
-    /// Arguments for the command (when containerizing a command)
-    #[arg(trailing_var_arg = true)]
-    pub args: Vec<String>,
+    #[command(subcommand)]
+    pub command: Commands,
     
     /// Environment variables to pass to the container
     /// Format: KEY=VALUE
-    #[arg(short, long, value_name = "KEY=VALUE")]
+    #[arg(short, long, value_name = "KEY=VALUE", global = true)]
     pub env: Option<Vec<String>>,
     
     /// Mount volumes in the container
     /// Format: /host/path:/container/path
-    #[arg(short, long, value_name = "HOST_PATH:CONTAINER_PATH")]
+    #[arg(short, long, value_name = "HOST_PATH:CONTAINER_PATH", global = true)]
     pub volume: Option<Vec<String>>,
     
     /// Enable verbose logging
-    #[arg(short = 'V', long, action = ArgAction::Count)]
+    #[arg(short = 'V', long, action = ArgAction::Count, global = true)]
     pub verbose: u8,
     
     /// Skip auto-containerization (treat the command as a Docker image directly)
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub direct: bool,
+    
+    /// Use host network for package registry access
+    #[arg(long, global = true)]
+    pub host_network: bool,
+    
+    /// Forward registry configuration from host
+    /// Supports: npmrc, pip.conf, poetry config, requirements.txt with --index-url
+    #[arg(long, global = true)]
+    pub forward_registry: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// Run an MCP server
+    Run {
+        /// MCP server image, command, git repository URL, or local directory to run
+        target: String,
+        
+        /// Arguments for the command (when containerizing a command)
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    /// List finch-mcp containers and images
+    List {
+        /// Show all containers (including stopped ones)
+        #[arg(short, long)]
+        all: bool,
+    },
+    /// Clean up finch-mcp containers and images
+    Cleanup {
+        /// Remove all finch-mcp containers and images
+        #[arg(short, long)]
+        all: bool,
+        
+        /// Remove only stopped containers
+        #[arg(short, long)]
+        containers: bool,
+        
+        /// Remove only unused images
+        #[arg(short, long)]
+        images: bool,
+        
+        /// Force removal without confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
 }
 
 impl Cli {
@@ -61,10 +102,26 @@ impl Cli {
         cli
     }
     
+    /// Get the target string (for run operations)
+    pub fn get_target(&self) -> &str {
+        match &self.command {
+            Commands::Run { target, .. } => target,
+            _ => unreachable!("Only run command should call this"),
+        }
+    }
+    
+    /// Get the args (for run operations)  
+    pub fn get_args(&self) -> &[String] {
+        match &self.command {
+            Commands::Run { args, .. } => args,
+            _ => unreachable!("Only run command should call this"),
+        }
+    }
+    
     /// Convert CLI args to RunOptions (for direct container mode)
     pub fn to_run_options(&self) -> RunOptions {
         RunOptions {
-            image_name: self.command.clone(),
+            image_name: self.get_target().to_string(),
             env_vars: self.env.clone(),
             volumes: self.volume.clone(),
         }
@@ -72,29 +129,36 @@ impl Cli {
     
     /// Convert CLI args to AutoContainerizeOptions
     pub fn to_auto_containerize_options(&self) -> AutoContainerizeOptions {
+        let target = self.get_target();
+        let args = self.get_args();
+        
         // Check if the command looks like a quoted command string
         // (contains spaces and common command patterns)
-        if self.args.is_empty() && (
-            self.command.contains(" -") || 
-            self.command.contains(" @") || 
-            self.command.starts_with("npx ") ||
-            self.command.starts_with("uvx ")
+        if args.is_empty() && (
+            target.contains(" -") || 
+            target.contains(" @") || 
+            target.starts_with("npx ") ||
+            target.starts_with("uvx ")
         ) {
             // Parse as a quoted command string
-            let (parsed_command, parsed_args) = crate::utils::command_parser::parse_command_string(&self.command);
+            let (parsed_command, parsed_args) = crate::utils::command_parser::parse_command_string(target);
             AutoContainerizeOptions {
                 command: parsed_command,
                 args: parsed_args,
                 env_vars: self.env.clone().unwrap_or_default(),
                 volumes: self.volume.clone().unwrap_or_default(),
+                host_network: self.host_network,
+                forward_registry: self.forward_registry,
             }
         } else {
             // Use as separate command and args
             AutoContainerizeOptions {
-                command: self.command.clone(),
-                args: self.args.clone(),
+                command: target.to_string(),
+                args: args.to_vec(),
                 env_vars: self.env.clone().unwrap_or_default(),
                 volumes: self.volume.clone().unwrap_or_default(),
+                host_network: self.host_network,
+                forward_registry: self.forward_registry,
             }
         }
     }
@@ -102,36 +166,43 @@ impl Cli {
     /// Convert CLI args to GitContainerizeOptions
     pub fn to_git_containerize_options(&self) -> GitContainerizeOptions {
         GitContainerizeOptions {
-            repo_url: self.command.clone(),
-            args: self.args.clone(),
+            repo_url: self.get_target().to_string(),
+            args: self.get_args().to_vec(),
             env_vars: self.env.clone().unwrap_or_default(),
             volumes: self.volume.clone().unwrap_or_default(),
+            host_network: self.host_network,
+            forward_registry: self.forward_registry,
         }
     }
     
     /// Convert CLI args to LocalContainerizeOptions
     pub fn to_local_containerize_options(&self) -> LocalContainerizeOptions {
         LocalContainerizeOptions {
-            local_path: self.command.clone(),
-            args: self.args.clone(),
+            local_path: self.get_target().to_string(),
+            args: self.get_args().to_vec(),
             env_vars: self.env.clone().unwrap_or_default(),
             volumes: self.volume.clone().unwrap_or_default(),
+            host_network: self.host_network,
+            forward_registry: self.forward_registry,
         }
     }
     
     /// Determine if we should use direct container mode or auto-containerization
     pub fn is_direct_container(&self) -> bool {
-        self.direct || (!self.command.contains(' ') && self.command.contains('/') && !GitRepository::is_git_url(&self.command) && !self.is_local_directory())
+        let target = self.get_target();
+        self.direct || (!target.contains(' ') && target.contains('/') && !GitRepository::is_git_url(target) && !self.is_local_directory())
     }
     
     /// Determine if the command is a git repository URL
     pub fn is_git_repository(&self) -> bool {
-        GitRepository::is_git_url(&self.command)
+        let target = self.get_target();
+        GitRepository::is_git_url(target)
     }
     
     /// Determine if the command is a local directory path
     pub fn is_local_directory(&self) -> bool {
-        let path = Path::new(&self.command);
+        let target = self.get_target();
+        let path = Path::new(target);
         path.exists() && path.is_dir()
     }
 }
@@ -149,12 +220,16 @@ mod tests {
     #[test]
     fn test_to_run_options() {
         let cli = Cli {
-            command: "test-image:latest".to_string(),
-            args: vec![],
+            command: Commands::Run {
+                target: "test-image:latest".to_string(),
+                args: vec![],
+            },
             env: Some(vec!["KEY=VALUE".to_string(), "DEBUG=true".to_string()]),
             volume: Some(vec!["/host:/container".to_string()]),
             verbose: 0,
             direct: true,
+            host_network: false,
+            forward_registry: false,
         };
         
         let run_options = cli.to_run_options();
@@ -167,12 +242,16 @@ mod tests {
     #[test]
     fn test_to_auto_containerize_options() {
         let cli = Cli {
-            command: "uvx".to_string(),
-            args: vec!["mcp-server-time".to_string()],
+            command: Commands::Run {
+                target: "uvx".to_string(),
+                args: vec!["mcp-server-time".to_string()],
+            },
             env: Some(vec!["DEBUG=true".to_string()]),
             volume: Some(vec!["/host:/container".to_string()]),
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         
         let options = cli.to_auto_containerize_options();
@@ -187,34 +266,46 @@ mod tests {
     fn test_is_direct_container() {
         // Direct flag overrides
         let cli1 = Cli {
-            command: "uvx".to_string(),
-            args: vec![],
+            command: Commands::Run {
+                target: "uvx".to_string(),
+                args: vec![],
+            },
             env: None,
             volume: None,
             verbose: 0,
             direct: true,
+            host_network: false,
+            forward_registry: false,
         };
         assert!(cli1.is_direct_container());
         
         // Docker-like image path
         let cli2 = Cli {
-            command: "ghcr.io/user/image:tag".to_string(),
-            args: vec![],
+            command: Commands::Run {
+                target: "ghcr.io/user/image:tag".to_string(),
+                args: vec![],
+            },
             env: None,
             volume: None,
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         assert!(cli2.is_direct_container());
         
         // Regular command
         let cli3 = Cli {
-            command: "uvx".to_string(),
-            args: vec!["mcp-server-time".to_string()],
+            command: Commands::Run {
+                target: "uvx".to_string(),
+                args: vec!["mcp-server-time".to_string()],
+            },
             env: None,
             volume: None,
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         assert!(!cli3.is_direct_container());
     }
@@ -223,34 +314,46 @@ mod tests {
     fn test_is_local_directory() {
         // Test with existing directory (current directory should exist)
         let cli1 = Cli {
-            command: ".".to_string(),
-            args: vec![],
+            command: Commands::Run {
+                target: ".".to_string(),
+                args: vec![],
+            },
             env: None,
             volume: None,
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         assert!(cli1.is_local_directory());
         
         // Test with non-existent directory
         let cli2 = Cli {
-            command: "./non-existent-dir-12345".to_string(),
-            args: vec![],
+            command: Commands::Run {
+                target: "./non-existent-dir-12345".to_string(),
+                args: vec![],
+            },
             env: None,
             volume: None,
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         assert!(!cli2.is_local_directory());
         
         // Test with regular command
         let cli3 = Cli {
-            command: "uvx".to_string(),
-            args: vec![],
+            command: Commands::Run {
+                target: "uvx".to_string(),
+                args: vec![],
+            },
             env: None,
             volume: None,
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         assert!(!cli3.is_local_directory());
     }
@@ -258,12 +361,16 @@ mod tests {
     #[test]
     fn test_to_local_containerize_options() {
         let cli = Cli {
-            command: "./test-dir".to_string(),
-            args: vec!["arg1".to_string(), "arg2".to_string()],
+            command: Commands::Run {
+                target: "./test-dir".to_string(),
+                args: vec!["arg1".to_string(), "arg2".to_string()],
+            },
             env: Some(vec!["KEY=VALUE".to_string()]),
             volume: Some(vec!["/host:/container".to_string()]),
             verbose: 0,
             direct: false,
+            host_network: false,
+            forward_registry: false,
         };
         
         let options = cli.to_local_containerize_options();

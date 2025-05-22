@@ -11,6 +11,7 @@ pub mod utils {
     pub mod command_detector;
     pub mod command_parser;
     pub mod git_repository;
+    pub mod progress;
     pub mod project_detector;
 }
 pub mod core {
