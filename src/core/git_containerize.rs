@@ -209,6 +209,9 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
 pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Result<()> {
     use console::style;
     
+    // Debug: Log that we're using the regular function
+    log::info!("🚨 DEBUG: Using local_containerize_and_run REGULAR function");
+    
     let local_path = PathBuf::from(&options.local_path);
     
     // Validate that the path exists and is a directory
@@ -523,6 +526,9 @@ pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Re
 /// Local containerize and run for MCP clients (build-then-run in one step)
 pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -> Result<()> {
     use std::process::Stdio;
+    
+    // Debug: Log that we're using the MCP function
+    log::info!("🚨 DEBUG: Using local_containerize_and_run_MCP function");
     
     let local_path = PathBuf::from(&options.local_path);
     

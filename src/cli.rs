@@ -277,7 +277,7 @@ impl Cli {
         
         // Check if parent process looks like an MCP client
         if let Ok(parent) = std::env::var("_") {
-            if parent.contains("claude") || parent.contains("mcp") {
+            if (parent.contains("claude") || parent.contains("mcp")) && !parent.contains("finch-mcp") {
                 return true;
             }
         }
@@ -289,6 +289,12 @@ impl Cli {
     
     /// Check if the target looks like a container image
     fn looks_like_container_image(target: &str) -> bool {
+        // First check if it's an existing local path - if so, it's NOT a container image
+        let path = std::path::Path::new(target);
+        if path.exists() {
+            return false;
+        }
+        
         // Standard Docker image patterns
         if target.contains(':') && !target.starts_with("http") && !target.contains(' ') {
             // registry.com/namespace/image:tag

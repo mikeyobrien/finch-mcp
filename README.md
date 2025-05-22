@@ -315,6 +315,53 @@ finch vm status
 
 For more troubleshooting, see the [Finch documentation](https://runfinch.com/docs/).
 
+## Validation and Testing
+
+### MCP Inspector Integration
+
+finch-mcp integrates with the official [`@modelcontextprotocol/inspector`](https://github.com/modelcontextprotocol/inspector) for validation and testing. This ensures that containerized MCP servers maintain full protocol compliance.
+
+#### Quick Validation
+
+Test npm local functionality:
+```bash
+./scripts/test-npm-validation.sh
+```
+
+This validates:
+- ✅ npm MCP servers work correctly with Inspector
+- ✅ finch-mcp can containerize npm projects  
+- ✅ MCP protocol compliance is maintained
+
+#### Comprehensive Testing
+
+For detailed validation:
+```bash
+./scripts/validate-mcp-inspector.sh [project-path] [finch-mcp-binary]
+```
+
+This tests:
+- Direct MCP server functionality
+- finch-mcp UI vs MCP modes
+- Container build and caching
+- JSON-RPC protocol compliance
+
+#### Manual Testing with Inspector
+
+Test an npm MCP server directly:
+```bash
+cd tests/fixtures/test-mcp-filesystem
+npx @modelcontextprotocol/inspector --cli npx -y @modelcontextprotocol/server-filesystem /tmp --method tools/list
+```
+
+Launch Inspector UI for interactive testing:
+```bash
+npx @modelcontextprotocol/inspector npx -y @modelcontextprotocol/server-filesystem /tmp
+# Opens web interface at http://localhost:6274
+```
+
+For detailed documentation, see [MCP Inspector Integration](./docs/mcp-inspector-integration.md).
+
 ## License
 
 MIT License - See LICENSE file for details.

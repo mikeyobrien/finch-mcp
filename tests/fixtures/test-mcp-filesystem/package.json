@@ -4,7 +4,7 @@
   "description": "MCP Filesystem Server for Finch-MCP",
   "main": "index.js",
   "scripts": {
-    "start": "npx -y @modelcontextprotocol/server-filesystem /projects"
+    "start": "npx -y @modelcontextprotocol/server-filesystem /tmp"
   },
   "keywords": [
     "mcp",

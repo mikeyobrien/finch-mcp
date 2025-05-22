@@ -82,3 +82,12 @@ jobs:
       with:
         name: finch-mcp-${{ matrix.os }}
         path: target/release/finch-mcp.exe
+
+    - name: Validate MCP Inspector Integration (macOS only)
+      if: matrix.os == 'macos-latest'
+      run: |
+        # Note: Node.js is pre-installed in GitHub Actions
+        # Make validation script executable
+        chmod +x scripts/test-npm-validation.sh
+        # Run npm MCP validation
+        ./scripts/test-npm-validation.sh
