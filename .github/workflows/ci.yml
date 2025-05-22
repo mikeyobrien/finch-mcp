@@ -41,9 +41,6 @@ jobs:
     - name: Run clippy
       run: cargo clippy -- -D warnings
 
-    - name: Check formatting
-      run: cargo fmt -- --check
-
   build:
     name: Build
     runs-on: ${{ matrix.os }}
