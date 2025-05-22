@@ -884,8 +884,15 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
         
         ProjectType::NodeJs => {
             let node_version = project_info.node_version.as_deref().unwrap_or("20");
+            
+            // Determine if this package has bin entries that need global installation
+            let has_bin_command = project_info.bin_command.is_some();
+            
             let entry_command = if let Some(ref run_cmd) = project_info.run_command {
                 run_cmd.clone()
+            } else if let Some(ref bin_cmd) = project_info.bin_command {
+                // Use the bin command name directly
+                bin_cmd.clone()
             } else if let Some(ref entry_point) = project_info.entry_point {
                 format!("node {}", entry_point)
             } else if !args.is_empty() {
@@ -900,18 +907,28 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
             };
             
+            // Generate appropriate build and install steps
+            let (build_steps, install_steps) = if has_bin_command {
+                (
+                    "# Build the package if needed\nRUN npm run build 2>/dev/null || echo \"No build script found, skipping...\"\n\n".to_string(),
+                    "# Install the package globally to create bin symlinks\nRUN npm install -g .\n\n".to_string()
+                )
+            } else {
+                ("".to_string(), "".to_string())
+            };
+            
             Ok(format!(
                 r#"FROM node:{}-slim
 
 WORKDIR /app
-{registry_section}
+{}
 # Copy project files
 COPY . .
 
 # Install dependencies
 RUN npm install
 
-# Set environment variables for MCP
+{}{}# Set environment variables for MCP
 ENV MCP_ENABLED=true
 ENV MCP_STDIO=true
 
@@ -919,8 +936,10 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 node_version,
-                entry_command,
-                registry_section = registry_section
+                registry_section,
+                build_steps,
+                install_steps,
+                entry_command
             ))
         }
         
@@ -934,8 +953,14 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 _ => "npm install",
             };
             
+            // Determine if this package has bin entries that need global installation
+            let has_bin_command = project_info.bin_command.is_some();
+            
             let entry_command = if let Some(ref run_cmd) = project_info.run_command {
                 run_cmd.clone()
+            } else if let Some(ref bin_cmd) = project_info.bin_command {
+                // Use the bin command name directly
+                bin_cmd.clone()
             } else if let Some(ref entry_point) = project_info.entry_point {
                 format!("node {}", entry_point)
             } else if !args.is_empty() {
@@ -961,32 +986,54 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
             };
             
+            // Generate appropriate build and install steps for monorepos
+            let (build_steps, install_steps) = if has_bin_command {
+                let build_cmd = match package_manager {
+                    "pnpm" => "pnpm run build",
+                    "yarn" => "yarn build",
+                    _ => "npm run build",
+                };
+                let install_cmd = match package_manager {
+                    "pnpm" => "pnpm install -g .",
+                    "yarn" => "yarn global add file:.",
+                    _ => "npm install -g .",
+                };
+                (
+                    format!("# Build the package if needed\nRUN {} 2>/dev/null || echo \"No build script found, skipping...\"\n\n", build_cmd),
+                    format!("# Install the package globally to create bin symlinks\nRUN {}\n\n", install_cmd)
+                )
+            } else {
+                ("".to_string(), "".to_string())
+            };
+            
             Ok(format!(
-                r#"FROM node:{node_version}-slim
+                r#"FROM node:{}-slim
 
 WORKDIR /app
-{registry_section}
+{}
 # Install package manager if needed
-{pm_install}
+{}
 
 # Copy project files
 COPY . .
 
 # Install dependencies
-RUN {install_command}
+RUN {}
 
-# Set environment variables for MCP
+{}{}# Set environment variables for MCP
 ENV MCP_ENABLED=true
 ENV MCP_STDIO=true
 
 # Run the application
-CMD ["sh", "-c", "{entry_command} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
+CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
-                node_version = node_version,
-                registry_section = registry_section,
-                pm_install = pm_install,
-                install_command = install_command,
-                entry_command = entry_command
+                node_version,
+                registry_section,
+                pm_install,
+                install_command,
+                build_steps,
+                install_steps,
+                entry_command
             ))
         }
         
@@ -1043,6 +1090,7 @@ mod tests {
             project_type: ProjectType::PythonPoetry,
             name: Some("test-server".to_string()),
             entry_point: Some("test-server".to_string()),
+            bin_command: None,
             install_command: Some("poetry install".to_string()),
             run_command: None,
             python_version: Some("3.11".to_string()),
@@ -1063,6 +1111,7 @@ mod tests {
             project_type: ProjectType::NodeJs,
             name: Some("test-server".to_string()),
             entry_point: Some("index.js".to_string()),
+            bin_command: None,
             install_command: Some("npm install".to_string()),
             run_command: None,
             python_version: None,
@@ -1075,5 +1124,29 @@ mod tests {
         assert!(dockerfile.contains("FROM node:20-slim"));
         assert!(dockerfile.contains("RUN npm install"));
         assert!(dockerfile.contains("node index.js"));
+    }
+
+    #[test]
+    fn test_generate_dockerfile_nodejs_with_bin_command() {
+        let project_info = ProjectInfo {
+            project_type: ProjectType::NodeJs,
+            name: Some("my-mcp-server".to_string()),
+            entry_point: Some("./bin/server.js".to_string()),
+            bin_command: Some("my-server".to_string()),
+            install_command: Some("npm install".to_string()),
+            run_command: None,
+            python_version: None,
+            node_version: Some("18".to_string()),
+            is_monorepo: false,
+            package_manager: None,
+        };
+        
+        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
+        assert!(dockerfile.contains("FROM node:18-slim"));
+        assert!(dockerfile.contains("RUN npm install"));
+        assert!(dockerfile.contains("npm run build"));
+        assert!(dockerfile.contains("npm install -g ."));
+        assert!(dockerfile.contains("my-server"));
+        assert!(!dockerfile.contains("node ./bin/server.js")); // Should use bin command, not direct file
     }
 }

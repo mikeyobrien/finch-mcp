@@ -21,6 +21,7 @@ pub struct ProjectInfo {
     pub project_type: ProjectType,
     pub name: Option<String>,
     pub entry_point: Option<String>,
+    pub bin_command: Option<String>,  // The bin command name (e.g., "my-server")
     pub install_command: Option<String>,
     pub run_command: Option<String>,
     pub python_version: Option<String>,
@@ -52,6 +53,7 @@ pub fn detect_project_type(repo_path: &Path) -> Result<ProjectInfo> {
         project_type: ProjectType::Unknown,
         name: None,
         entry_point: None,
+        bin_command: None,
         install_command: None,
         run_command: None,
         python_version: None,
@@ -83,6 +85,7 @@ fn detect_python_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             project_type: ProjectType::PythonSetupPy,
             name: extract_setup_py_name(repo_path)?,
             entry_point: None,
+            bin_command: None,
             install_command: Some("pip install -e .".to_string()),
             run_command: None,
             python_version: Some("3.11".to_string()),
@@ -99,6 +102,7 @@ fn detect_python_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             project_type: ProjectType::PythonRequirements,
             name: None,
             entry_point: None,
+            bin_command: None,
             install_command: Some("pip install -r requirements.txt".to_string()),
             run_command: None,
             python_version: Some("3.11".to_string()),
@@ -140,24 +144,30 @@ fn detect_nodejs_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             (ProjectType::NodeJs, None, "npm install".to_string())
         };
         
-        // Look for MCP server entry point
-        let entry_point = package_json.get("bin")
+        // Look for MCP server entry point and bin command
+        let (entry_point, bin_command) = package_json.get("bin")
             .and_then(|bin| {
                 if let Some(bin_str) = bin.as_str() {
-                    Some(bin_str.to_string())
+                    // Single bin entry: use package name as command
+                    let cmd_name = name.clone().unwrap_or_else(|| "server".to_string());
+                    Some((bin_str.to_string(), cmd_name))
                 } else if let Some(bin_obj) = bin.as_object() {
-                    // Get the first binary entry
-                    bin_obj.values().next()
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
+                    // Multiple bin entries: get the first one
+                    bin_obj.iter().next()
+                        .and_then(|(key, value)| {
+                            value.as_str().map(|path| (path.to_string(), key.clone()))
+                        })
                 } else {
                     None
                 }
             })
-            .or_else(|| {
-                package_json.get("main")
+            .map(|(path, cmd)| (Some(path), Some(cmd)))
+            .unwrap_or_else(|| {
+                // Fall back to main entry point
+                let main_entry = package_json.get("main")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
+                    .map(|s| s.to_string());
+                (main_entry, None)
             });
         
         // Check for start script
@@ -189,6 +199,7 @@ fn detect_nodejs_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             project_type,
             name,
             entry_point,
+            bin_command,
             install_command: Some(install_command),
             run_command,
             python_version: None,
@@ -211,6 +222,7 @@ fn detect_rust_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             project_type: ProjectType::Rust,
             name: None,
             entry_point: None,
+            bin_command: None,
             install_command: Some("cargo build --release".to_string()),
             run_command: Some("cargo run".to_string()),
             python_version: None,
@@ -291,6 +303,7 @@ fn parse_pyproject_toml(content: &str) -> Result<ProjectInfo> {
         project_type,
         name,
         entry_point,
+        bin_command: None,
         install_command,
         run_command: None,
         python_version,
