@@ -61,6 +61,38 @@ This will automatically:
 2. Create an appropriate container environment
 3. Run the server in STDIO mode
 
+### Local Directory Mode (NEW!)
+
+Containerize and run an MCP server from a local directory:
+
+```bash
+finch-mcp-stdio ./my-mcp-project
+finch-mcp-stdio /absolute/path/to/project
+```
+
+This will automatically:
+1. Detect the project type (Node.js, Python, etc.) from files like `package.json` or `pyproject.toml`
+2. Create an appropriate Dockerfile based on the project structure
+3. Build and run the container in STDIO mode
+
+Supports various project types:
+- **Node.js**: Projects with `package.json` (including monorepos with workspaces)
+- **Python**: Projects with `pyproject.toml` (Poetry/UV), `setup.py`, or `requirements.txt`
+- **TypeScript**: Automatically compiled during build
+
+### Git Repository Mode (NEW!)
+
+Clone and containerize an MCP server directly from a git repository:
+
+```bash
+finch-mcp-stdio https://github.com/user/mcp-server-repo
+```
+
+This will automatically:
+1. Clone the repository to a temporary directory
+2. Detect the project type and dependencies
+3. Build and run the container in STDIO mode
+
 ### With Environment Variables
 
 ```bash
@@ -80,7 +112,7 @@ USAGE:
     finch-mcp-stdio [OPTIONS] <COMMAND> [ARGS]...
 
 ARGS:
-    <COMMAND>       MCP server image or command to run
+    <COMMAND>       MCP server image, command, git repository URL, or local directory to run
     [ARGS]...       Arguments for the command
 
 OPTIONS:

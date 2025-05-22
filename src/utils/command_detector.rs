@@ -238,9 +238,9 @@ mod tests {
         };
         
         let dockerfile = generate_dockerfile_content(&details);
-        assert!(dockerfile.contains("FROM python:3.9-slim"));
+        assert!(dockerfile.contains("FROM python:3.11-slim"));
         assert!(dockerfile.contains("RUN pip install uv"));
-        assert!(dockerfile.contains("RUN uv pip install mcp-server-time"));
+        assert!(dockerfile.contains("RUN uv pip install --system mcp-server-time"));
         assert!(dockerfile.contains("uvx mcp-server-time --local-timezone UTC"));
     }
 }

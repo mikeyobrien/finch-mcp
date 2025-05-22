@@ -1,9 +1,10 @@
 use clap::{Parser, ArgAction};
 use log::debug;
+use std::path::Path;
 
 use crate::run::RunOptions;
 use crate::core::auto_containerize::AutoContainerizeOptions;
-use crate::core::git_containerize::GitContainerizeOptions;
+use crate::core::git_containerize::{GitContainerizeOptions, LocalContainerizeOptions};
 use crate::utils::git_repository::GitRepository;
 
 /// Finch-MCP STDIO - Tool for running MCP servers in STDIO mode with Finch
@@ -11,7 +12,7 @@ use crate::utils::git_repository::GitRepository;
 #[command(author, version, about, long_about = None)]
 #[command(disable_version_flag(true))]
 pub struct Cli {
-    /// MCP server image or command to run
+    /// MCP server image, command, git repository URL, or local directory to run
     #[arg(required = true)]
     pub command: String,
     
@@ -108,14 +109,30 @@ impl Cli {
         }
     }
     
+    /// Convert CLI args to LocalContainerizeOptions
+    pub fn to_local_containerize_options(&self) -> LocalContainerizeOptions {
+        LocalContainerizeOptions {
+            local_path: self.command.clone(),
+            args: self.args.clone(),
+            env_vars: self.env.clone().unwrap_or_default(),
+            volumes: self.volume.clone().unwrap_or_default(),
+        }
+    }
+    
     /// Determine if we should use direct container mode or auto-containerization
     pub fn is_direct_container(&self) -> bool {
-        self.direct || (!self.command.contains(' ') && self.command.contains('/') && !GitRepository::is_git_url(&self.command))
+        self.direct || (!self.command.contains(' ') && self.command.contains('/') && !GitRepository::is_git_url(&self.command) && !self.is_local_directory())
     }
     
     /// Determine if the command is a git repository URL
     pub fn is_git_repository(&self) -> bool {
         GitRepository::is_git_url(&self.command)
+    }
+    
+    /// Determine if the command is a local directory path
+    pub fn is_local_directory(&self) -> bool {
+        let path = Path::new(&self.command);
+        path.exists() && path.is_dir()
     }
 }
 
@@ -200,5 +217,60 @@ mod tests {
             direct: false,
         };
         assert!(!cli3.is_direct_container());
+    }
+    
+    #[test]
+    fn test_is_local_directory() {
+        // Test with existing directory (current directory should exist)
+        let cli1 = Cli {
+            command: ".".to_string(),
+            args: vec![],
+            env: None,
+            volume: None,
+            verbose: 0,
+            direct: false,
+        };
+        assert!(cli1.is_local_directory());
+        
+        // Test with non-existent directory
+        let cli2 = Cli {
+            command: "./non-existent-dir-12345".to_string(),
+            args: vec![],
+            env: None,
+            volume: None,
+            verbose: 0,
+            direct: false,
+        };
+        assert!(!cli2.is_local_directory());
+        
+        // Test with regular command
+        let cli3 = Cli {
+            command: "uvx".to_string(),
+            args: vec![],
+            env: None,
+            volume: None,
+            verbose: 0,
+            direct: false,
+        };
+        assert!(!cli3.is_local_directory());
+    }
+    
+    #[test]
+    fn test_to_local_containerize_options() {
+        let cli = Cli {
+            command: "./test-dir".to_string(),
+            args: vec!["arg1".to_string(), "arg2".to_string()],
+            env: Some(vec!["KEY=VALUE".to_string()]),
+            volume: Some(vec!["/host:/container".to_string()]),
+            verbose: 0,
+            direct: false,
+        };
+        
+        let options = cli.to_local_containerize_options();
+        
+        assert_eq!(options.local_path, "./test-dir");
+        assert_eq!(options.args, vec!["arg1", "arg2"]);
+        assert_eq!(options.env_vars, vec!["KEY=VALUE"]);
+        assert_eq!(options.volumes, vec!["/host:/container"]);
     }
 }

@@ -1,7 +1,7 @@
 use finch_mcp_stdio::cli::Cli;
 use finch_mcp_stdio::run::run_stdio_container;
 use finch_mcp_stdio::core::auto_containerize::auto_containerize_and_run;
-use finch_mcp_stdio::core::git_containerize::git_containerize_and_run;
+use finch_mcp_stdio::core::git_containerize::{git_containerize_and_run, local_containerize_and_run};
 use log::{info, error};
 
 #[tokio::main]
@@ -46,6 +46,24 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(err) => {
                 error!("Error running git-containerized MCP server: {}", err);
+                Err(err)
+            }
+        }
+    } else if cli.is_local_directory() {
+        // Local directory mode - containerize and run from local path
+        let local_options = cli.to_local_containerize_options();
+        
+        // Log the start of execution
+        info!("Starting MCP server in STDIO mode with local directory: {}", local_options.local_path);
+        
+        // Run the local containerization process
+        match local_containerize_and_run(local_options).await {
+            Ok(_) => {
+                info!("Local-containerized MCP server exited successfully");
+                Ok(())
+            }
+            Err(err) => {
+                error!("Error running local-containerized MCP server: {}", err);
                 Err(err)
             }
         }

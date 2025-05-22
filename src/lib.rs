@@ -23,4 +23,4 @@ pub use run::{RunOptions, run_stdio_container};
 pub use finch::client::{FinchClient, StdioRunOptions};
 pub use templates::dockerfile::{DockerfileOptions, generate_stdio_dockerfile};
 pub use core::auto_containerize::{AutoContainerizeOptions, auto_containerize_and_run};
-pub use core::git_containerize::{GitContainerizeOptions, git_containerize_and_run};
+pub use core::git_containerize::{GitContainerizeOptions, git_containerize_and_run, LocalContainerizeOptions, local_containerize_and_run};
