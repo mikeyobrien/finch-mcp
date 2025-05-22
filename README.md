@@ -16,11 +16,14 @@ A specialized tool for running MCP (Model Context Protocol) servers in STDIO mod
 
 ## Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.70 or later
 - [Finch](https://runfinch.com/) (for container management)
+  - **First-time users**: finch-mcp-stdio will automatically run `finch vm init` if needed
+  - **Manual setup**: You can also run `finch vm init` manually if you prefer
 - Either:
   - An MCP server image with STDIO mode support, OR
   - A command that runs an MCP server (e.g., `uvx mcp-server-time`)
+
+**Note**: If building from source, you'll also need [Rust](https://www.rust-lang.org/tools/install) 1.70 or later.
 
 ## Installation
 
@@ -271,6 +274,46 @@ cargo doc --no-deps --open
 6. STDIO is connected between your terminal and the containerized server
 
 For more details, see [Auto-Containerization Documentation](./docs/auto-containerization.md).
+
+## Troubleshooting
+
+### First-time Finch Setup
+
+If you're using Finch for the first time, `finch-mcp-stdio` will automatically initialize the VM:
+
+```bash
+finch-mcp-stdio uvx mcp-server-time
+# Output:
+# 🚀 Initializing Finch VM for first-time use...
+# This may take a few minutes to download and set up the VM.
+# [VM initialization progress...]
+# ✅ Finch VM initialized successfully!
+# 🔄 Starting Finch VM...
+# ✅ Finch VM started successfully
+```
+
+### Manual Finch Setup
+
+If you prefer to set up Finch manually:
+
+```bash
+# Initialize the VM (first-time only)
+finch vm init
+
+# Start the VM
+finch vm start
+
+# Check VM status
+finch vm status
+```
+
+### Common Issues
+
+1. **"Finch is not installed"**: Install Finch from https://runfinch.com/
+2. **VM initialization takes a long time**: This is normal for first-time setup as it downloads VM images
+3. **Permission errors**: On some systems, you may need to run with appropriate permissions or add your user to the docker group equivalent
+
+For more troubleshooting, see the [Finch documentation](https://runfinch.com/docs/).
 
 ## License
 

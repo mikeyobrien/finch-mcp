@@ -2,6 +2,7 @@ use finch_mcp_stdio::cli::Cli;
 use finch_mcp_stdio::run::run_stdio_container;
 use finch_mcp_stdio::core::auto_containerize::auto_containerize_and_run;
 use finch_mcp_stdio::core::git_containerize::{git_containerize_and_run, local_containerize_and_run};
+use finch_mcp_stdio::finch::client::FinchClient;
 use log::{info, error};
 
 #[tokio::main]
@@ -12,6 +13,16 @@ async fn main() -> anyhow::Result<()> {
     // Print banner
     println!("Finch-MCP STDIO v{}", env!("CARGO_PKG_VERSION"));
     println!("-------------------------------");
+    
+    // Check if Finch is available early to provide helpful error messages
+    let finch_client = FinchClient::new();
+    if !finch_client.is_finch_available().await? {
+        error!("Finch is not installed or not available");
+        eprintln!("\n❌ Error: Finch is required but not found");
+        eprintln!("📥 Please install Finch from: https://runfinch.com/");
+        eprintln!("💡 Finch is a container runtime that enables finch-mcp-stdio to run MCP servers");
+        std::process::exit(1);
+    }
     
     if cli.is_direct_container() {
         // Direct container mode - run existing container
