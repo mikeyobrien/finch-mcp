@@ -107,7 +107,7 @@ fn test_run_options_creation() {
         env_vars: Some(vec!["VAR=VALUE".to_string()]),
         volumes: Some(vec!["/host:/container".to_string()]),
     };
-    
+
     assert_eq!(options.image_name, "test-image");
     assert_eq!(options.env_vars.unwrap()[0], "VAR=VALUE");
     assert_eq!(options.volumes.unwrap()[0], "/host:/container");
