@@ -110,9 +110,10 @@ impl DockerBuildProgress {
             elapsed.as_secs_f64()
         ));
     }
-    
+
     pub fn finish_error(&self, error: &str) {
-        self.progress.finish_with_message(&format!("❌ Build failed: {}", style(error).red()));
+        self.progress
+            .finish_with_message(&format!("❌ Build failed: {}", style(error).red()));
     }
 }
 
