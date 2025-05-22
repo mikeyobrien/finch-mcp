@@ -193,7 +193,7 @@ fn parse_docker_output(
     let reader = BufReader::new(stdout);
     let mut current_phase = 0;
     
-    for line in reader.lines().flatten() {
+    for line in reader.lines().map_while(Result::ok) {
         // Parse Docker build steps to track progress
         if line.contains("FROM ") && current_phase == 0 {
             if let Ok(mut p) = progress.lock() {

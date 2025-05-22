@@ -9,7 +9,7 @@ pub fn parse_command_string(input: &str) -> (String, Vec<String>) {
     let mut in_quotes = false;
     let mut chars = input.chars().peekable();
     
-    while let Some(ch) = chars.next() {
+    for ch in chars.by_ref() {
         match ch {
             '"' | '\'' => {
                 in_quotes = !in_quotes;
