@@ -1,6 +1,7 @@
 use finch_mcp_stdio::cli::Cli;
 use finch_mcp_stdio::run::run_stdio_container;
 use finch_mcp_stdio::core::auto_containerize::auto_containerize_and_run;
+use finch_mcp_stdio::core::git_containerize::git_containerize_and_run;
 use log::{info, error};
 
 #[tokio::main]
@@ -27,6 +28,24 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(err) => {
                 error!("Error running MCP server container: {}", err);
+                Err(err)
+            }
+        }
+    } else if cli.is_git_repository() {
+        // Git repository mode - clone, build, and run
+        let git_options = cli.to_git_containerize_options();
+        
+        // Log the start of execution
+        info!("Starting MCP server in STDIO mode with git repository: {}", git_options.repo_url);
+        
+        // Run the git containerization process
+        match git_containerize_and_run(git_options).await {
+            Ok(_) => {
+                info!("Git-containerized MCP server exited successfully");
+                Ok(())
+            }
+            Err(err) => {
+                error!("Error running git-containerized MCP server: {}", err);
                 Err(err)
             }
         }

@@ -3,6 +3,8 @@ use log::debug;
 
 use crate::run::RunOptions;
 use crate::core::auto_containerize::AutoContainerizeOptions;
+use crate::core::git_containerize::GitContainerizeOptions;
+use crate::utils::git_repository::GitRepository;
 
 /// Finch-MCP STDIO - Tool for running MCP servers in STDIO mode with Finch
 #[derive(Parser, Debug)]
@@ -96,9 +98,24 @@ impl Cli {
         }
     }
     
+    /// Convert CLI args to GitContainerizeOptions
+    pub fn to_git_containerize_options(&self) -> GitContainerizeOptions {
+        GitContainerizeOptions {
+            repo_url: self.command.clone(),
+            args: self.args.clone(),
+            env_vars: self.env.clone().unwrap_or_default(),
+            volumes: self.volume.clone().unwrap_or_default(),
+        }
+    }
+    
     /// Determine if we should use direct container mode or auto-containerization
     pub fn is_direct_container(&self) -> bool {
-        self.direct || !self.command.contains(' ') && self.command.contains('/')
+        self.direct || (!self.command.contains(' ') && self.command.contains('/') && !GitRepository::is_git_url(&self.command))
+    }
+    
+    /// Determine if the command is a git repository URL
+    pub fn is_git_repository(&self) -> bool {
+        GitRepository::is_git_url(&self.command)
     }
 }
 

@@ -1,13 +1,11 @@
 use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use log::{debug, info};
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use crate::utils::command_detector::{detect_command_type, generate_dockerfile_content, CommandDetails, CommandType};
+use crate::utils::command_detector::{detect_command_type, generate_dockerfile_content, CommandType};
 use crate::finch::client::{FinchClient, StdioRunOptions};
 
 pub struct AutoContainerizeOptions {
