@@ -182,7 +182,7 @@ fn detect_nodejs_project(repo_path: &Path) -> Result<Option<ProjectInfo>> {
             .and_then(|v| v.as_str());
         
         let node_version = raw_node_version
-            .map(|s| normalize_node_version(s))
+            .map(normalize_node_version)
             .or_else(|| Some("20".to_string())); // Default to Node 20
         
         return Ok(Some(ProjectInfo {

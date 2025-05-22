@@ -59,6 +59,12 @@ pub struct DockerBuildProgress {
     current_phase: usize,
 }
 
+impl Default for DockerBuildProgress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DockerBuildProgress {
     pub fn new() -> Self {
         let build_phases = vec![
@@ -187,49 +193,47 @@ fn parse_docker_output(
     let reader = BufReader::new(stdout);
     let mut current_phase = 0;
     
-    for line in reader.lines() {
-        if let Ok(line) = line {
-            // Parse Docker build steps to track progress
-            if line.contains("FROM ") && current_phase == 0 {
-                if let Ok(mut p) = progress.lock() {
-                    p.start_phase(1); // Pulling base image
-                    current_phase = 1;
-                }
-            } else if (line.contains("RUN pip install") || 
-                      line.contains("RUN npm install") || 
-                      line.contains("RUN poetry install") ||
-                      line.contains("RUN uv pip install")) && current_phase <= 1 {
-                if let Ok(mut p) = progress.lock() {
-                    p.start_phase(2); // Installing dependencies
-                    current_phase = 2;
-                }
-            } else if line.contains("COPY . .") && current_phase <= 2 {
-                if let Ok(mut p) = progress.lock() {
-                    p.start_phase(3); // Copying application files
-                    current_phase = 3;
-                }
-            } else if line.contains("exporting to image") && current_phase <= 3 {
-                if let Ok(mut p) = progress.lock() {
-                    p.start_phase(4); // Finalizing image
-                    current_phase = 4;
-                }
+    for line in reader.lines().flatten() {
+        // Parse Docker build steps to track progress
+        if line.contains("FROM ") && current_phase == 0 {
+            if let Ok(mut p) = progress.lock() {
+                p.start_phase(1); // Pulling base image
+                current_phase = 1;
             }
-            
-            // Update with specific progress messages
-            if line.contains("downloading") {
-                if let Ok(p) = progress.lock() {
-                    p.update_message("downloading base image");
-                }
-            } else if line.contains("extracting") {
-                if let Ok(p) = progress.lock() {
-                    p.update_message("extracting layers");
-                }
-            } else if line.contains("npm WARN") || line.contains("warning") {
-                // Don't update for warnings, just continue
-            } else if line.contains("found ") && line.contains("vulnerabilities") {
-                if let Ok(p) = progress.lock() {
-                    p.update_message("security scan complete");
-                }
+        } else if (line.contains("RUN pip install") || 
+                  line.contains("RUN npm install") || 
+                  line.contains("RUN poetry install") ||
+                  line.contains("RUN uv pip install")) && current_phase <= 1 {
+            if let Ok(mut p) = progress.lock() {
+                p.start_phase(2); // Installing dependencies
+                current_phase = 2;
+            }
+        } else if line.contains("COPY . .") && current_phase <= 2 {
+            if let Ok(mut p) = progress.lock() {
+                p.start_phase(3); // Copying application files
+                current_phase = 3;
+            }
+        } else if line.contains("exporting to image") && current_phase <= 3 {
+            if let Ok(mut p) = progress.lock() {
+                p.start_phase(4); // Finalizing image
+                current_phase = 4;
+            }
+        }
+        
+        // Update with specific progress messages
+        if line.contains("downloading") {
+            if let Ok(p) = progress.lock() {
+                p.update_message("downloading base image");
+            }
+        } else if line.contains("extracting") {
+            if let Ok(p) = progress.lock() {
+                p.update_message("extracting layers");
+            }
+        } else if line.contains("npm WARN") || line.contains("warning") {
+            // Don't update for warnings, just continue
+        } else if line.contains("found ") && line.contains("vulnerabilities") {
+            if let Ok(p) = progress.lock() {
+                p.update_message("security scan complete");
             }
         }
     }
