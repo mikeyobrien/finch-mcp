@@ -79,6 +79,49 @@ impl GitRepository {
         Ok(clone_path)
     }
 
+    /// Clone the repository to a temporary directory with optional quiet mode
+    pub async fn clone_to_temp_quiet(&mut self, quiet: bool) -> Result<PathBuf> {
+        let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
+        let clone_path = temp_dir.path().join("repo");
+        
+        info!("Cloning repository {} to {:?}", self.url, clone_path);
+        
+        let mut cmd = Command::new("git");
+        cmd.arg("clone")
+           .arg("--depth").arg("1"); // Shallow clone for faster downloads
+        
+        // Add branch specification if provided
+        if let Some(ref branch) = self.branch {
+            cmd.arg("--branch").arg(branch);
+        }
+        
+        cmd.arg(&self.url)
+           .arg(&clone_path);
+        
+        // Redirect output based on quiet mode
+        if quiet {
+            cmd.stdout(Stdio::null())
+               .stderr(Stdio::null());
+        } else {
+            cmd.stdout(Stdio::inherit())
+               .stderr(Stdio::inherit());
+        }
+        
+        debug!("Running git command: {:?}", cmd);
+        
+        let status = cmd.status().context("Failed to execute git clone command")?;
+        
+        if !status.success() {
+            return Err(anyhow::anyhow!("Git clone failed with status: {}", status));
+        }
+        
+        // Keep the temp directory alive by storing it
+        self.local_path = Some(clone_path.clone());
+        self._temp_dir = Some(temp_dir);
+        
+        Ok(clone_path)
+    }
+
     /// Get the local path of the cloned repository
     pub fn local_path(&self) -> Option<&Path> {
         self.local_path.as_deref()

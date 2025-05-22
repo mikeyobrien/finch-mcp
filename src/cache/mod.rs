@@ -226,6 +226,73 @@ impl CacheManager {
         let short_hash = &content_hash[..12.min(content_hash.len())];
         format!("mcp-cache-{}-{}", project_type.to_lowercase(), short_hash)
     }
+    
+    /// Generate a smart, human-readable image name
+    pub fn generate_smart_image_name(&self, 
+        source_type: &str, 
+        project_type: &str, 
+        identifier: &str, 
+        content_hash: &str
+    ) -> String {
+        // Take first 8 characters of hash for readability
+        let short_hash = &content_hash[..8.min(content_hash.len())];
+        
+        // Sanitize identifier to be Docker-safe
+        let clean_identifier = Self::sanitize_docker_name(identifier);
+        
+        // Sanitize project type
+        let clean_project_type = Self::sanitize_docker_name(project_type);
+        
+        format!("mcp-{}-{}-{}-{}", 
+            source_type.to_lowercase(),
+            clean_project_type,
+            clean_identifier,
+            short_hash
+        )
+    }
+    
+    /// Sanitize a string to be safe for Docker image names
+    /// Docker image names must be lowercase and can only contain: a-z, 0-9, -, _, .
+    fn sanitize_docker_name(name: &str) -> String {
+        let result = name.to_lowercase()
+            .chars()
+            .map(|c| match c {
+                'a'..='z' | '0'..='9' | '-' | '_' | '.' => c,
+                '/' | '\\' | ':' => '-',
+                ' ' => '-',
+                _ => '_'
+            })
+            .collect::<String>();
+        
+        // Trim leading and trailing special characters
+        result
+            .trim_start_matches(&['-', '_', '.'])
+            .trim_end_matches(&['-', '_', '.'])
+            .to_string()
+    }
+    
+    /// Extract meaningful identifier from source path/URL
+    pub fn extract_identifier(source_path: &str) -> String {
+        if source_path.contains("github.com") || source_path.contains("gitlab.com") || source_path.contains(".git") {
+            // Git repository - extract repo name
+            if let Some(repo_name) = source_path.split('/').last() {
+                return repo_name.trim_end_matches(".git").to_string();
+            }
+        } else if source_path.starts_with('/') || source_path.contains("\\") {
+            // Local path - extract directory name
+            if let Some(dir_name) = source_path.split(['/', '\\']).last() {
+                return dir_name.to_string();
+            }
+        } else {
+            // Command - extract command name
+            if let Some(cmd_name) = source_path.split_whitespace().next() {
+                return cmd_name.to_string();
+            }
+        }
+        
+        // Fallback - use a portion of the source path
+        source_path.chars().take(20).collect()
+    }
 }
 
 impl Default for CacheManager {
@@ -279,5 +346,46 @@ mod tests {
         let manager = CacheManager::new().unwrap();
         let name = manager.generate_cached_image_name("abcdef123456789", "nodejs");
         assert_eq!(name, "mcp-cache-nodejs-abcdef123456");
+    }
+    
+    #[test]
+    fn test_generate_smart_image_name() {
+        let manager = CacheManager::new().unwrap();
+        
+        // Test git repository
+        let name = manager.generate_smart_image_name("git", "NodeJs", "my-server", "abcdef123456");
+        assert_eq!(name, "mcp-git-nodejs-my-server-abcdef12");
+        
+        // Test with special characters
+        let name = manager.generate_smart_image_name("local", "Python", "My App/Server", "123456789abc");
+        assert_eq!(name, "mcp-local-python-my-app-server-12345678");
+        
+        // Test auto command
+        let name = manager.generate_smart_image_name("auto", "UVX", "time-server", "fedcba987654");
+        assert_eq!(name, "mcp-auto-uvx-time-server-fedcba98");
+    }
+    
+    #[test]
+    fn test_sanitize_docker_name() {
+        assert_eq!(CacheManager::sanitize_docker_name("My-App"), "my-app");
+        assert_eq!(CacheManager::sanitize_docker_name("server/name"), "server-name");
+        assert_eq!(CacheManager::sanitize_docker_name("app:version"), "app-version");
+        assert_eq!(CacheManager::sanitize_docker_name("test_123"), "test_123");
+        assert_eq!(CacheManager::sanitize_docker_name("_-special-_"), "special");
+    }
+    
+    #[test]
+    fn test_extract_identifier() {
+        // Git URLs
+        assert_eq!(CacheManager::extract_identifier("https://github.com/user/my-repo.git"), "my-repo");
+        assert_eq!(CacheManager::extract_identifier("git@github.com:user/server.git"), "server");
+        
+        // Local paths
+        assert_eq!(CacheManager::extract_identifier("/home/user/my-project"), "my-project");
+        assert_eq!(CacheManager::extract_identifier("C:\\Users\\user\\app"), "app");
+        
+        // Commands
+        assert_eq!(CacheManager::extract_identifier("uvx mcp-server-time"), "uvx");
+        assert_eq!(CacheManager::extract_identifier("npx create-app"), "npx");
     }
 }

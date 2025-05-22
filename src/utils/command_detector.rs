@@ -86,17 +86,36 @@ pub fn generate_dockerfile_content(details: &CommandDetails) -> String {
             let package_name = details.package_name.clone().unwrap_or_default();
             let command_with_args = format!("{} {}", details.command, details.args.join(" "));
             format!(
-                r#"FROM python:3.11-slim
+                r#"# Multi-stage build for smaller final image
+FROM python:3.11-alpine AS builder
 
-# Install uv for package management
-RUN pip install uv
+# Install build dependencies in a single layer
+RUN apk add --no-cache --virtual .build-deps \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    && pip install --no-cache-dir uv \
+    && uv pip install --system {} \
+    && apk del .build-deps
 
-# Install required package
-RUN uv pip install --system {}
+# Final runtime stage
+FROM python:3.11-alpine AS runtime
 
-# Set environment variables for MCP
-ENV MCP_ENABLED=true
-ENV MCP_STDIO=true
+# Copy only the installed packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Set optimized environment variables
+ENV MCP_ENABLED=true \
+    MCP_STDIO=true \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Create non-root user for security
+RUN addgroup -g 1000 -S mcp && \
+    adduser -u 1000 -S mcp -G mcp
+
+USER mcp
 
 # Run the command with arguments
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
@@ -107,11 +126,30 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
         }
         CommandType::PythonPip => {
             format!(
-                r#"FROM python:3.11-slim
+                r#"FROM python:3.11-alpine
 
-# Set environment variables for MCP
-ENV MCP_ENABLED=true
-ENV MCP_STDIO=true
+# Install system dependencies efficiently
+RUN apk add --no-cache --virtual .build-deps \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    && apk add --no-cache \
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
+
+# Set optimized environment variables
+ENV MCP_ENABLED=true \
+    MCP_STDIO=true \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Create non-root user
+RUN addgroup -g 1000 -S mcp && \
+    adduser -u 1000 -S mcp -G mcp
+
+USER mcp
 
 # Install and run the command
 CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
@@ -122,11 +160,26 @@ CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
         }
         CommandType::NodeNpm => {
             format!(
-                r#"FROM node:20-slim
+                r#"FROM node:20-alpine
 
-# Set environment variables for MCP
-ENV MCP_ENABLED=true
-ENV MCP_STDIO=true
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Set optimized environment variables
+ENV MCP_ENABLED=true \
+    MCP_STDIO=true \
+    NODE_ENV=production \
+    NPM_CONFIG_CACHE=/tmp/.npm \
+    NPM_CONFIG_LOGLEVEL=warn
+
+# Create non-root user
+RUN addgroup -g 1000 -S mcp && \
+    adduser -u 1000 -S mcp -G mcp
+
+USER mcp
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
 
 # Run the command with arguments
 CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
@@ -176,11 +229,28 @@ CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
             };
             
             format!(
-                r#"FROM node:20-slim
+                r#"# Multi-stage build for NPX packages
+FROM node:20-alpine AS base
 
-# Set environment variables for MCP
-ENV MCP_ENABLED=true
-ENV MCP_STDIO=true
+# Install dumb-init and common tools
+RUN apk add --no-cache dumb-init
+
+# Set optimized environment variables
+ENV MCP_ENABLED=true \
+    MCP_STDIO=true \
+    NODE_ENV=production \
+    NPM_CONFIG_CACHE=/tmp/.npm \
+    NPM_CONFIG_LOGLEVEL=warn \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+# Create non-root user
+RUN addgroup -g 1000 -S mcp && \
+    adduser -u 1000 -S mcp -G mcp
+
+USER mcp
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
 
 # Run the npx command
 CMD ["sh", "-c", "npx {}{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
@@ -191,11 +261,29 @@ CMD ["sh", "-c", "npx {}{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
         }
         CommandType::Generic => {
             format!(
-                r#"FROM debian:bullseye-slim
+                r#"FROM alpine:3.19
 
-# Set environment variables for MCP
-ENV MCP_ENABLED=true
-ENV MCP_STDIO=true
+# Install essential tools and dumb-init
+RUN apk add --no-cache \
+    bash \
+    curl \
+    wget \
+    ca-certificates \
+    dumb-init \
+    && rm -rf /var/cache/apk/*
+
+# Set optimized environment variables
+ENV MCP_ENABLED=true \
+    MCP_STDIO=true
+
+# Create non-root user
+RUN addgroup -g 1000 -S mcp && \
+    adduser -u 1000 -S mcp -G mcp
+
+USER mcp
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
 
 # Run the command with arguments
 CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
@@ -239,9 +327,10 @@ mod tests {
         };
         
         let dockerfile = generate_dockerfile_content(&details);
-        assert!(dockerfile.contains("FROM python:3.11-slim"));
-        assert!(dockerfile.contains("RUN pip install uv"));
-        assert!(dockerfile.contains("RUN uv pip install --system mcp-server-time"));
+        assert!(dockerfile.contains("FROM python:3.11-alpine"));
+        assert!(dockerfile.contains("Multi-stage build"));
+        assert!(dockerfile.contains("pip install --no-cache-dir uv"));
+        assert!(dockerfile.contains("uv pip install --system mcp-server-time"));
         assert!(dockerfile.contains("uvx mcp-server-time --local-timezone UTC"));
     }
 }

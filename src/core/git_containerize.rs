@@ -10,6 +10,8 @@ use crate::utils::project_detector::{detect_project_type, ProjectType, ProjectIn
 use crate::utils::progress::run_build_with_progress;
 use crate::finch::client::{FinchClient, StdioRunOptions};
 use crate::cache::{CacheManager, ContentHasher, hash_build_options};
+use crate::logging::LogManager;
+use crate::status;
 
 pub struct GitContainerizeOptions {
     pub repo_url: String,
@@ -42,7 +44,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&options.repo_url, &content_hash, &build_options_hash).await {
-        println!("{} Using cached image: {}", style("⚡").yellow(), style(&cached_image).cyan());
+        status!("⚡ Using cached image: {}", style(&cached_image).cyan());
         info!("Cache hit for git repository: {}", options.repo_url);
         
         // Prepare environment variables
@@ -57,7 +59,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
         }
         
         // Run the cached container
-        println!("{} Starting server...\n", style("🚀").green());
+        status!("🚀 Starting server...\n");
         info!("Running cached containerized git repository");
         let finch_client = FinchClient::new();
         let run_options = StdioRunOptions {
@@ -71,14 +73,19 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     }
     
     // Cache miss - need to build
-    println!("{} Cache miss - building container...", style("🔨").blue());
+    status!("🔨 Cache miss - building container...");
+    
+    // Initialize logging
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("git", &options.repo_url)?;
+    let build_start = std::time::Instant::now();
     
     // Parse and clone the repository
     let mut git_repo = GitRepository::new(&options.repo_url);
     
-    println!("\n{} Cloning repository...", style("📦").blue());
+    status!("\n🔄 Cloning repository...");
     info!("Cloning repository: {}", git_repo.url);
-    let repo_path = git_repo.clone_to_temp().await?;
+    let repo_path = git_repo.clone_to_temp_quiet(crate::output::is_quiet_mode()).await?;
     
     // Detect the project type
     let project_info = detect_project_type(&repo_path)?;
@@ -88,8 +95,14 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
         return Err(anyhow::anyhow!("Could not detect project type in repository"));
     }
     
-    // Generate deterministic image name based on content hash
-    let image_name = cache_manager.generate_cached_image_name(&content_hash, &format!("{:?}", project_info.project_type));
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&options.repo_url);
+    let image_name = cache_manager.generate_smart_image_name(
+        "git",
+        &format!("{:?}", project_info.project_type),
+        &identifier,
+        &content_hash
+    );
     
     // Create temp directory for Dockerfile
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
@@ -137,7 +150,25 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     
     build_command.arg(&build_context);
     
-    run_build_with_progress(&mut build_command, &image_name, project_type_str)?;
+    // Log build command
+    log_manager.append_to_log(&log_filename, &format!("Build command: {:?}", build_command))?;
+    
+    let build_result = run_build_with_progress(&mut build_command, &image_name, project_type_str);
+    
+    let build_duration = build_start.elapsed().as_secs();
+    
+    match &build_result {
+        Ok(_) => {
+            log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+            log_manager.finish_build_log(&log_filename, true, build_duration)?;
+        }
+        Err(e) => {
+            log_manager.append_to_log(&log_filename, &format!("Build failed: {}", e))?;
+            log_manager.finish_build_log(&log_filename, false, build_duration)?;
+        }
+    }
+    
+    build_result?;
     
     // Store in cache after successful build
     cache_manager.store_cache_entry(
@@ -148,7 +179,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
         &format!("{:?}", project_info.project_type),
     )?;
     
-    println!("{} Image cached for future use", style("💾").green());
+    status!("💾 Image cached for future use");
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;
@@ -162,7 +193,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     }
     
     // Run the container
-    println!("{} Starting server...\n", style("🚀").green());
+    status!("🚀 Starting server...\n");
     info!("Running containerized git repository");
     let finch_client = FinchClient::new();
     let run_options = StdioRunOptions {
@@ -199,7 +230,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&options.local_path, &content_hash, &build_options_hash).await {
-        println!("{} Using cached image: {}", style("⚡").yellow(), style(&cached_image).cyan());
+        status!("⚡ Using cached image: {}", style(&cached_image).cyan());
         info!("Cache hit for local directory: {}", options.local_path);
         
         // Prepare environment variables
@@ -214,7 +245,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         }
         
         // Run the cached container
-        println!("{} Starting server...\n", style("🚀").green());
+        status!("🚀 Starting server...\n");
         info!("Running cached containerized local directory");
         let finch_client = FinchClient::new();
         let run_options = StdioRunOptions {
@@ -228,9 +259,14 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     }
     
     // Cache miss - need to build
-    println!("{} Cache miss - building container...", style("🔨").blue());
+    status!("🔨 Cache miss - building container...");
     
-    println!("\n{} Analyzing project...", style("🔍").blue());
+    // Initialize logging
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("local", &options.local_path)?;
+    let build_start = std::time::Instant::now();
+    
+    status!("\n🔍 Analyzing project...");
     info!("Containerizing local directory: {}", local_path.display());
     
     // Detect the project type
@@ -241,8 +277,14 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         return Err(anyhow::anyhow!("Could not detect project type in directory"));
     }
     
-    // Generate deterministic image name based on content hash
-    let image_name = cache_manager.generate_cached_image_name(&content_hash, &format!("{:?}", project_info.project_type));
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&options.local_path);
+    let image_name = cache_manager.generate_smart_image_name(
+        "local",
+        &format!("{:?}", project_info.project_type),
+        &identifier,
+        &content_hash
+    );
     
     // Create temp directory for Dockerfile
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
@@ -290,7 +332,25 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     
     build_command.arg(&build_context);
     
-    run_build_with_progress(&mut build_command, &image_name, project_type_str)?;
+    // Log build command
+    log_manager.append_to_log(&log_filename, &format!("Build command: {:?}", build_command))?;
+    
+    let build_result = run_build_with_progress(&mut build_command, &image_name, project_type_str);
+    
+    let build_duration = build_start.elapsed().as_secs();
+    
+    match &build_result {
+        Ok(_) => {
+            log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+            log_manager.finish_build_log(&log_filename, true, build_duration)?;
+        }
+        Err(e) => {
+            log_manager.append_to_log(&log_filename, &format!("Build failed: {}", e))?;
+            log_manager.finish_build_log(&log_filename, false, build_duration)?;
+        }
+    }
+    
+    build_result?;
     
     // Store in cache after successful build
     cache_manager.store_cache_entry(
@@ -301,7 +361,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         &format!("{:?}", project_info.project_type),
     )?;
     
-    println!("{} Image cached for future use", style("💾").green());
+    status!("💾 Image cached for future use");
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;
@@ -315,7 +375,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     }
     
     // Run the container
-    println!("{} Starting server...\n", style("🚀").green());
+    status!("🚀 Starting server...\n");
     info!("Running containerized local directory");
     let finch_client = FinchClient::new();
     let run_options = StdioRunOptions {

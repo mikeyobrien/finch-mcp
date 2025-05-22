@@ -84,6 +84,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: CacheCommands,
     },
+    
+    /// Manage build logs
+    Logs {
+        #[command(subcommand)]
+        action: LogCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -104,6 +110,32 @@ pub enum CacheCommands {
         #[arg(short, long, default_value = "7")]
         max_age: u64,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LogCommands {
+    /// List recent build logs
+    List {
+        /// Number of logs to show (default: 10)
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+    },
+    
+    /// Show contents of a specific log file
+    Show {
+        /// Log filename to display
+        filename: String,
+    },
+    
+    /// Clean up old log files
+    Cleanup {
+        /// Maximum age in days for log files (default: 30)
+        #[arg(short, long, default_value = "30")]
+        max_age: u32,
+    },
+    
+    /// Show logs directory path
+    Path,
 }
 
 impl Cli {

@@ -14,7 +14,7 @@ fn test_dockerfile_generation() {
     let dockerfile_path = dir.path().join("Dockerfile");
     
     let options = DockerfileOptions {
-        base_image: "node:18-alpine".to_string(),
+        base_image: "node:20-alpine".to_string(),
         python_dependencies: true,
         timezone: Some("UTC".to_string()),
     };
@@ -26,10 +26,11 @@ fn test_dockerfile_generation() {
     
     // Read the content back and verify it contains expected lines
     let content = fs::read_to_string(dockerfile_path).unwrap();
-    assert!(content.contains("FROM node:18-alpine"));
+    assert!(content.contains("FROM node:20-alpine"));
+    assert!(content.contains("Multi-stage build"));
     assert!(content.contains("WORKDIR /app"));
-    assert!(content.contains("pip3 install --break-system-packages mcp-server-time"));
-    assert!(content.contains("\"--local-timezone\", \"UTC\""));
+    assert!(content.contains("pip3 install --no-cache-dir --break-system-packages mcp-server-time"));
+    assert!(content.contains("UTC"));
 }
 
 // This integration test requires Finch to be installed

@@ -1,9 +1,10 @@
-use finch_mcp::cli::{Cli, Commands, CacheCommands};
+use finch_mcp::cli::{Cli, Commands, CacheCommands, LogCommands};
 use finch_mcp::run::run_stdio_container;
 use finch_mcp::core::auto_containerize::auto_containerize_and_run;
 use finch_mcp::core::git_containerize::{git_containerize_and_run, local_containerize_and_run};
 use finch_mcp::finch::client::FinchClient;
 use finch_mcp::cache::CacheManager;
+use finch_mcp::logging::LogManager;
 use log::{info, error};
 
 #[tokio::main]
@@ -41,6 +42,11 @@ async fn main() -> anyhow::Result<()> {
         
         Commands::Cache { action } => {
             handle_cache_command(action).await?;
+            Ok(())
+        }
+        
+        Commands::Logs { action } => {
+            handle_log_command(action).await?;
             Ok(())
         }
         
@@ -191,6 +197,74 @@ async fn handle_cache_command(action: &CacheCommands) -> anyhow::Result<()> {
             } else {
                 println!("{} No old cache entries to clean up", style("✅").green());
             }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Handle log-related commands
+async fn handle_log_command(action: &LogCommands) -> anyhow::Result<()> {
+    use console::style;
+    
+    match action {
+        LogCommands::List { limit } => {
+            let log_manager = LogManager::new()?;
+            let logs = log_manager.list_recent_logs(*limit)?;
+            
+            if logs.is_empty() {
+                println!("{} No build logs found", style("ℹ️").blue());
+                println!("Build logs will appear here after container builds");
+                return Ok(());
+            }
+            
+            println!("\n{} Recent Build Logs", style("📄").blue());
+            println!();
+            
+            for log_entry in logs {
+                let time_str = log_entry.created_at.format("%Y-%m-%d %H:%M:%S UTC");
+                println!("{} {} {} ({})", 
+                    style("📁").blue(),
+                    style(&log_entry.filename).cyan(),
+                    style(&log_entry.operation_type).green(),
+                    style(time_str).dim()
+                );
+                println!("   {}", style(&log_entry.identifier).dim());
+            }
+            
+            println!();
+            println!("Use {} to view a specific log", style("finch-mcp logs show <filename>").cyan());
+        }
+        
+        LogCommands::Show { filename } => {
+            let log_manager = LogManager::new()?;
+            let log_path = log_manager.get_logs_directory_path().join(filename);
+            
+            if !log_path.exists() {
+                eprintln!("{} Log file not found: {}", style("❌").red(), filename);
+                eprintln!("Use {} to see available logs", style("finch-mcp logs list").cyan());
+                return Ok(());
+            }
+            
+            let content = std::fs::read_to_string(&log_path)?;
+            println!("{}", content);
+        }
+        
+        LogCommands::Cleanup { max_age } => {
+            let log_manager = LogManager::new()?;
+            let removed_count = log_manager.cleanup_old_logs(*max_age)?;
+            
+            if removed_count > 0 {
+                println!("{} Cleaned up {} old log files", style("🧹").green(), removed_count);
+            } else {
+                println!("{} No old log files to clean up", style("✅").green());
+            }
+        }
+        
+        LogCommands::Path => {
+            let log_manager = LogManager::new()?;
+            let log_dir = log_manager.get_logs_directory_path();
+            println!("{}", log_dir.display());
         }
     }
     

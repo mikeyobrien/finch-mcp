@@ -7,6 +7,8 @@ use tempfile::TempDir;
 use crate::utils::command_detector::{detect_command_type, generate_dockerfile_content, CommandType};
 use crate::finch::client::{FinchClient, StdioRunOptions};
 use crate::cache::{CacheManager, ContentHasher, hash_build_options};
+use crate::logging::LogManager;
+use crate::status;
 
 pub struct AutoContainerizeOptions {
     pub command: String,
@@ -31,7 +33,7 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&command_key, &content_hash, &build_options_hash).await {
-        println!("{} Using cached image: {}", style("⚡").yellow(), style(&cached_image).cyan());
+        status!("⚡ Using cached image: {}", style(&cached_image).cyan());
         info!("Cache hit for command: {}", command_key);
         
         // Build extra args environment variable if needed
@@ -42,7 +44,7 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
         }
         
         // Run the cached container
-        println!("{} Starting server...\n", style("🚀").green());
+        status!("🚀 Starting server...\n");
         info!("Running cached auto-containerized command");
         let finch_client = FinchClient::new();
         let run_options = StdioRunOptions {
@@ -56,14 +58,25 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
     }
     
     // Cache miss - need to build
-    println!("{} Cache miss - building container...", style("🔨").blue());
+    status!("🔨 Cache miss - building container...");
+    
+    // Initialize logging
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("auto", &command_key)?;
+    let build_start = std::time::Instant::now();
     
     // Detect command type
     let command_details = detect_command_type(&options.command, &options.args);
     debug!("Detected command type: {:?}", command_details);
     
-    // Generate deterministic image name based on content hash
-    let image_name = cache_manager.generate_cached_image_name(&content_hash, &format!("{:?}", command_details.cmd_type));
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&command_key);
+    let image_name = cache_manager.generate_smart_image_name(
+        "auto",
+        &format!("{:?}", command_details.cmd_type),
+        &identifier,
+        &content_hash
+    );
     
     // Create temp directory for Dockerfile
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
@@ -95,15 +108,25 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
         .arg(&dockerfile_path)
         .arg(temp_dir.path());
     
+    // Log build command
+    log_manager.append_to_log(&log_filename, &format!("Build command: {:?}", build_command))?;
+    
     let build_status = build_command
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .status()
         .context("Failed to execute finch build command")?;
     
+    let build_duration = build_start.elapsed().as_secs();
+    
     if !build_status.success() {
+        log_manager.append_to_log(&log_filename, &format!("Build failed with status: {}", build_status))?;
+        log_manager.finish_build_log(&log_filename, false, build_duration)?;
         return Err(anyhow::anyhow!("Container build failed with status: {}", build_status));
     }
+    
+    log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+    log_manager.finish_build_log(&log_filename, true, build_duration)?;
     
     // Store in cache after successful build
     cache_manager.store_cache_entry(
@@ -114,7 +137,7 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
         &format!("{:?}", command_details.cmd_type),
     )?;
     
-    println!("{} Image cached for future use", style("💾").green());
+    status!("💾 Image cached for future use");
     
     // Build extra args environment variable if needed
     let mut env_vars = options.env_vars;
