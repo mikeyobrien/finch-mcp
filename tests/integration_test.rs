@@ -96,11 +96,11 @@ fn test_run_options_creation() {
         env_vars: None,
         volumes: None,
     };
-    
+
     assert_eq!(options.image_name, "test-image");
     assert!(options.env_vars.is_none());
     assert!(options.volumes.is_none());
-    
+
     // Test with all options
     let options = RunOptions {
         image_name: "test-image".to_string(),
