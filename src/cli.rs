@@ -248,7 +248,73 @@ impl Cli {
     /// Determine if we should use direct container mode or auto-containerization
     pub fn is_direct_container(&self) -> bool {
         let target = self.get_target();
-        self.direct || (!target.contains(' ') && target.contains('/') && !GitRepository::is_git_url(target) && !self.is_local_directory())
+        
+        // Explicit --direct flag
+        if self.direct {
+            return true;
+        }
+        
+        // Auto-detect container image patterns (but not for MCP clients)
+        if Self::looks_like_container_image(target) {
+            return true;
+        }
+        
+        // Fallback to existing logic
+        !target.contains(' ') && target.contains('/') && !GitRepository::is_git_url(target) && !self.is_local_directory()
+    }
+    
+    /// Check if we're running in an MCP client context
+    pub fn is_mcp_client_context(&self) -> bool {
+        Self::is_mcp_client_context_static()
+    }
+    
+    /// Static version for use in auto-detection
+    fn is_mcp_client_context_static() -> bool {
+        // MCP_STDIO environment variable (set by MCP clients)
+        if std::env::var("MCP_STDIO").is_ok() {
+            return true;
+        }
+        
+        // Check if parent process looks like an MCP client
+        if let Ok(parent) = std::env::var("_") {
+            if parent.contains("claude") || parent.contains("mcp") {
+                return true;
+            }
+        }
+        
+        // Check for common MCP client environment indicators
+        std::env::var("MCP_CLIENT").is_ok() || 
+        std::env::var("CLAUDE_DESKTOP").is_ok()
+    }
+    
+    /// Check if the target looks like a container image
+    fn looks_like_container_image(target: &str) -> bool {
+        // Standard Docker image patterns
+        if target.contains(':') && !target.starts_with("http") && !target.contains(' ') {
+            // registry.com/namespace/image:tag
+            if target.matches('/').count() >= 1 && target.contains(':') {
+                return true;
+            }
+            
+            // image:tag (simple case)
+            if !target.contains('/') && target.contains(':') && target.split(':').count() == 2 {
+                let parts: Vec<&str> = target.split(':').collect();
+                // Ensure tag doesn't look like a port number or URL
+                if !parts[1].chars().all(|c| c.is_ascii_digit()) && !parts[1].contains('.') {
+                    return true;
+                }
+            }
+        }
+        
+        // Registry patterns (no tag, implies :latest)
+        if target.contains('/') && !target.contains(' ') && !target.contains(':') {
+            // Skip obvious file paths
+            if !target.starts_with('.') && !target.starts_with('/') && !target.starts_with('~') {
+                return true;
+            }
+        }
+        
+        false
     }
     
     /// Determine if the command is a git repository URL

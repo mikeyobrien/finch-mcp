@@ -388,6 +388,277 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     finch_client.run_stdio_container(&run_options).await
 }
 
+/// Git containerize and run for MCP clients (build-then-run in one step)
+pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Result<()> {
+    use std::process::Stdio;
+    
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the git repository
+    let content_hash = content_hasher.hash_git_repository(&options.repo_url, None)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&options.repo_url, &content_hash, &build_options_hash).await {
+        // Run the cached container directly in MCP mode
+        let mut env_vars = options.env_vars;
+        env_vars.push("MCP_ENABLED=true".to_string());
+        env_vars.push("MCP_STDIO=true".to_string());
+        
+        if !options.args.is_empty() {
+            let extra_args = options.args.join(" ");
+            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        }
+        
+        let finch_client = FinchClient::new();
+        let run_options = StdioRunOptions {
+            image_name: cached_image,
+            env_vars,
+            volumes: options.volumes,
+            host_network: options.host_network,
+        };
+        
+        return finch_client.run_stdio_container(&run_options).await;
+    }
+    
+    // Build the image first (with suppressed output for MCP)
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("git-mcp", &options.repo_url)?;
+    let build_start = std::time::Instant::now();
+    
+    // Parse and clone the repository
+    let mut git_repo = GitRepository::new(&options.repo_url);
+    let repo_path = git_repo.clone_to_temp_quiet(true).await?; // Always quiet for MCP
+    
+    // Detect the project type
+    let project_info = detect_project_type(&repo_path)?;
+    
+    if project_info.project_type == ProjectType::Unknown {
+        return Err(anyhow::anyhow!("Could not detect project type in repository"));
+    }
+    
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&options.repo_url);
+    let image_name = cache_manager.generate_smart_image_name(
+        "git-mcp",
+        &format!("{:?}", project_info.project_type),
+        &identifier,
+        &content_hash
+    );
+    
+    // Create temp directory for Dockerfile
+    let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
+    let dockerfile_path = temp_dir.path().join("Dockerfile");
+    
+    // Generate Dockerfile content based on project type
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
+    fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
+    
+    // Copy repository contents to build context
+    let build_context = temp_dir.path().join("context");
+    fs::create_dir_all(&build_context).context("Failed to create build context directory")?;
+    copy_dir_all(&repo_path, &build_context).context("Failed to copy repository to build context")?;
+    fs::copy(&dockerfile_path, build_context.join("Dockerfile"))?;
+    
+    // Build the container image (suppress output for MCP)
+    let mut build_command = Command::new("finch");
+    build_command
+        .arg("build")
+        .arg("-t")
+        .arg(&image_name);
+    
+    if options.host_network {
+        build_command.arg("--network").arg("host");
+    }
+    
+    build_command
+        .arg(&build_context)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    
+    let build_status = build_command.status().context("Failed to execute finch build command")?;
+    let build_duration = build_start.elapsed().as_secs();
+    
+    if !build_status.success() {
+        log_manager.append_to_log(&log_filename, &format!("Build failed with status: {}", build_status))?;
+        log_manager.finish_build_log(&log_filename, false, build_duration)?;
+        return Err(anyhow::anyhow!("Container build failed with status: {}", build_status));
+    }
+    
+    log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+    log_manager.finish_build_log(&log_filename, true, build_duration)?;
+    
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &options.repo_url,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", project_info.project_type),
+    )?;
+    
+    // Run the container directly
+    let mut env_vars = options.env_vars;
+    env_vars.push("MCP_ENABLED=true".to_string());
+    env_vars.push("MCP_STDIO=true".to_string());
+    
+    if !options.args.is_empty() {
+        let extra_args = options.args.join(" ");
+        env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+    }
+    
+    let finch_client = FinchClient::new();
+    let run_options = StdioRunOptions {
+        image_name,
+        env_vars,
+        volumes: options.volumes,
+        host_network: options.host_network,
+    };
+    
+    finch_client.run_stdio_container(&run_options).await
+}
+
+/// Local containerize and run for MCP clients (build-then-run in one step)
+pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -> Result<()> {
+    use std::process::Stdio;
+    
+    let local_path = PathBuf::from(&options.local_path);
+    
+    // Validate that the path exists and is a directory
+    if !local_path.exists() {
+        return Err(anyhow::anyhow!("Path does not exist: {}", options.local_path));
+    }
+    
+    if !local_path.is_dir() {
+        return Err(anyhow::anyhow!("Path is not a directory: {}", options.local_path));
+    }
+    
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the local directory
+    let content_hash = content_hasher.hash_directory(&local_path)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&options.local_path, &content_hash, &build_options_hash).await {
+        // Run the cached container directly in MCP mode
+        let mut env_vars = options.env_vars;
+        env_vars.push("MCP_ENABLED=true".to_string());
+        env_vars.push("MCP_STDIO=true".to_string());
+        
+        if !options.args.is_empty() {
+            let extra_args = options.args.join(" ");
+            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        }
+        
+        let finch_client = FinchClient::new();
+        let run_options = StdioRunOptions {
+            image_name: cached_image,
+            env_vars,
+            volumes: options.volumes,
+            host_network: options.host_network,
+        };
+        
+        return finch_client.run_stdio_container(&run_options).await;
+    }
+    
+    // Build the image first (with suppressed output for MCP)
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("local-mcp", &options.local_path)?;
+    let build_start = std::time::Instant::now();
+    
+    // Detect the project type
+    let project_info = detect_project_type(&local_path)?;
+    
+    if project_info.project_type == ProjectType::Unknown {
+        return Err(anyhow::anyhow!("Could not detect project type in directory"));
+    }
+    
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&options.local_path);
+    let image_name = cache_manager.generate_smart_image_name(
+        "local-mcp",
+        &format!("{:?}", project_info.project_type),
+        &identifier,
+        &content_hash
+    );
+    
+    // Create temp directory for Dockerfile
+    let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
+    let dockerfile_path = temp_dir.path().join("Dockerfile");
+    
+    // Generate Dockerfile content based on project type
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
+    fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
+    
+    // Create build context and copy local directory contents
+    let build_context = temp_dir.path().join("context");
+    fs::create_dir_all(&build_context).context("Failed to create build context directory")?;
+    copy_dir_all(&local_path, &build_context).context("Failed to copy local directory to build context")?;
+    fs::copy(&dockerfile_path, build_context.join("Dockerfile"))?;
+    
+    // Build the container image (suppress output for MCP)
+    let mut build_command = Command::new("finch");
+    build_command
+        .arg("build")
+        .arg("-t")
+        .arg(&image_name);
+    
+    if options.host_network {
+        build_command.arg("--network").arg("host");
+    }
+    
+    build_command
+        .arg(&build_context)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    
+    let build_status = build_command.status().context("Failed to execute finch build command")?;
+    let build_duration = build_start.elapsed().as_secs();
+    
+    if !build_status.success() {
+        log_manager.append_to_log(&log_filename, &format!("Build failed with status: {}", build_status))?;
+        log_manager.finish_build_log(&log_filename, false, build_duration)?;
+        return Err(anyhow::anyhow!("Container build failed with status: {}", build_status));
+    }
+    
+    log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+    log_manager.finish_build_log(&log_filename, true, build_duration)?;
+    
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &options.local_path,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", project_info.project_type),
+    )?;
+    
+    // Run the container directly
+    let mut env_vars = options.env_vars;
+    env_vars.push("MCP_ENABLED=true".to_string());
+    env_vars.push("MCP_STDIO=true".to_string());
+    
+    if !options.args.is_empty() {
+        let extra_args = options.args.join(" ");
+        env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+    }
+    
+    let finch_client = FinchClient::new();
+    let run_options = StdioRunOptions {
+        image_name,
+        env_vars,
+        volumes: options.volumes,
+        host_network: options.host_network,
+    };
+    
+    finch_client.run_stdio_container(&run_options).await
+}
+
 fn get_registry_config(forward_registry: bool, project_type: &ProjectType) -> Vec<String> {
     if !forward_registry {
         return Vec::new();

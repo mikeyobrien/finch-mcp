@@ -1,7 +1,7 @@
 use finch_mcp::cli::{Cli, Commands, CacheCommands, LogCommands};
 use finch_mcp::run::run_stdio_container;
-use finch_mcp::core::auto_containerize::auto_containerize_and_run;
-use finch_mcp::core::git_containerize::{git_containerize_and_run, local_containerize_and_run};
+use finch_mcp::core::auto_containerize::{auto_containerize_and_run, auto_containerize_and_run_mcp};
+use finch_mcp::core::git_containerize::{git_containerize_and_run, local_containerize_and_run, git_containerize_and_run_mcp, local_containerize_and_run_mcp};
 use finch_mcp::finch::client::FinchClient;
 use finch_mcp::cache::CacheManager;
 use finch_mcp::logging::LogManager;
@@ -51,8 +51,8 @@ async fn main() -> anyhow::Result<()> {
         }
         
         Commands::Run { .. } => {
-            // For direct container mode, skip banner and do minimal setup
-            if cli.is_direct_container() {
+            // For direct container mode or MCP STDIO mode, skip banner and do minimal setup
+            if cli.is_direct_container() || cli.is_mcp_client_context() {
                 let finch_client = FinchClient::new();
                 if !finch_client.is_finch_available().await? {
                     error!("Finch is not installed or not available");
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
                 }
                 run_target(&cli).await
             } else {
-                // Non-direct mode - show banner and full setup
+                // Non-direct, non-MCP mode - show banner and full setup
                 println!("Finch-MCP v{}", env!("CARGO_PKG_VERSION"));
                 println!("-------------------------------");
                 
@@ -81,6 +81,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn run_target(cli: &Cli) -> anyhow::Result<()> {
+    let is_mcp_context = cli.is_mcp_client_context();
+    
     if cli.is_direct_container() {
         // Direct container mode - run existing container
         let run_options = cli.to_run_options();
@@ -99,44 +101,44 @@ async fn run_target(cli: &Cli) -> anyhow::Result<()> {
         // Git repository mode - clone, build, and run
         let git_options = cli.to_git_containerize_options();
         
-        // Log the start of execution
         info!("Starting MCP server in STDIO mode with git repository: {}", git_options.repo_url);
         
-        // Run the git containerization process
-        git_containerize_and_run(git_options).await.map_err(|err| {
-            error!("Error running git-containerized MCP server: {}", err);
-            err
-        })?;
-        info!("Git-containerized MCP server exited successfully");
+        if is_mcp_context {
+            // For MCP clients: build-then-run automatically
+            git_containerize_and_run_mcp(git_options).await?;
+        } else {
+            // Regular mode: existing behavior
+            git_containerize_and_run(git_options).await?;
+        }
         
     } else if cli.is_local_directory() {
         // Local directory mode - containerize and run from local path
         let local_options = cli.to_local_containerize_options();
         
-        // Log the start of execution
         info!("Starting MCP server in STDIO mode with local directory: {}", local_options.local_path);
         
-        // Run the local containerization process
-        local_containerize_and_run(local_options).await.map_err(|err| {
-            error!("Error running local-containerized MCP server: {}", err);
-            err
-        })?;
-        info!("Local-containerized MCP server exited successfully");
+        if is_mcp_context {
+            // For MCP clients: build-then-run automatically
+            local_containerize_and_run_mcp(local_options).await?;
+        } else {
+            // Regular mode: existing behavior
+            local_containerize_and_run(local_options).await?;
+        }
         
     } else {
         // Auto-containerization mode
         let auto_options = cli.to_auto_containerize_options();
         
-        // Log the start of execution
         info!("Starting MCP server in STDIO mode with auto-containerization: {} {}", 
              auto_options.command, auto_options.args.join(" "));
         
-        // Run the auto-containerization process
-        auto_containerize_and_run(auto_options).await.map_err(|err| {
-            error!("Error running auto-containerized MCP server: {}", err);
-            err
-        })?;
-        info!("Auto-containerized MCP server exited successfully");
+        if is_mcp_context {
+            // For MCP clients: build-then-run automatically
+            auto_containerize_and_run_mcp(auto_options).await?;
+        } else {
+            // Regular mode: existing behavior
+            auto_containerize_and_run(auto_options).await?;
+        }
     }
     
     Ok(())
