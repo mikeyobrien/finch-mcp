@@ -1,5 +1,9 @@
 # Finch-MCP
 
+[![CI](https://github.com/mikeyobrien/finch-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mikeyobrien/finch-mcp/actions/workflows/ci.yml)
+[![Release](https://github.com/mikeyobrien/finch-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/mikeyobrien/finch-mcp/actions/workflows/release.yml)
+[![Latest Release](https://img.shields.io/github/v/release/mikeyobrien/finch-mcp)](https://github.com/mikeyobrien/finch-mcp/releases/latest)
+
 A specialized tool for running MCP (Model Context Protocol) servers in STDIO mode using [Finch](https://runfinch.com/).
 
 ## Features
@@ -19,6 +23,51 @@ A specialized tool for running MCP (Model Context Protocol) servers in STDIO mod
   - A command that runs an MCP server (e.g., `uvx mcp-server-time`)
 
 ## Installation
+
+### Pre-built Binaries (Recommended)
+
+#### Quick Install (Unix)
+```bash
+curl -sSL https://raw.githubusercontent.com/mikeyobrien/finch-mcp/main/install.sh | bash
+```
+
+#### Manual Download
+Download the latest pre-built binary for your platform from the [Releases page](https://github.com/mikeyobrien/finch-mcp/releases):
+
+#### macOS
+```bash
+# Intel Macs
+curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-macos-x86_64.tar.gz
+tar -xzf finch-mcp-stdio.tar.gz
+chmod +x finch-mcp-stdio
+sudo mv finch-mcp-stdio /usr/local/bin/
+
+# Apple Silicon (M1/M2/M3)
+curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-macos-aarch64.tar.gz
+tar -xzf finch-mcp-stdio.tar.gz
+chmod +x finch-mcp-stdio
+sudo mv finch-mcp-stdio /usr/local/bin/
+```
+
+#### Linux
+```bash
+# x86_64
+curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-linux-x86_64.tar.gz
+tar -xzf finch-mcp-stdio.tar.gz
+chmod +x finch-mcp-stdio
+sudo mv finch-mcp-stdio /usr/local/bin/
+
+# ARM64
+curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-linux-aarch64.tar.gz
+tar -xzf finch-mcp-stdio.tar.gz
+chmod +x finch-mcp-stdio
+sudo mv finch-mcp-stdio /usr/local/bin/
+```
+
+#### Windows
+1. Download `finch-mcp-stdio-windows-x86_64.exe.zip` from the [Releases page](https://github.com/mikeyobrien/finch-mcp/releases)
+2. Extract the zip file
+3. Move `finch-mcp-stdio.exe` to a directory in your PATH
 
 ### From Source
 
