@@ -3,10 +3,10 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use log::{debug, info};
 use tempfile::TempDir;
-use uuid::Uuid;
 
 use crate::utils::command_detector::{detect_command_type, generate_dockerfile_content, CommandType};
 use crate::finch::client::{FinchClient, StdioRunOptions};
+use crate::cache::{CacheManager, ContentHasher, hash_build_options};
 
 pub struct AutoContainerizeOptions {
     pub command: String,
@@ -18,12 +18,52 @@ pub struct AutoContainerizeOptions {
 }
 
 pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Result<()> {
+    use console::style;
+    
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the command
+    let content_hash = content_hasher.hash_command(&options.command, &options.args)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    let command_key = format!("{} {}", options.command, options.args.join(" "));
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&command_key, &content_hash, &build_options_hash).await {
+        println!("{} Using cached image: {}", style("⚡").yellow(), style(&cached_image).cyan());
+        info!("Cache hit for command: {}", command_key);
+        
+        // Build extra args environment variable if needed
+        let mut env_vars = options.env_vars;
+        if !options.args.is_empty() {
+            let extra_args = options.args.join(" ");
+            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        }
+        
+        // Run the cached container
+        println!("{} Starting server...\n", style("🚀").green());
+        info!("Running cached auto-containerized command");
+        let finch_client = FinchClient::new();
+        let run_options = StdioRunOptions {
+            image_name: cached_image,
+            env_vars,
+            volumes: options.volumes,
+            host_network: options.host_network,
+        };
+        
+        return finch_client.run_stdio_container(&run_options).await;
+    }
+    
+    // Cache miss - need to build
+    println!("{} Cache miss - building container...", style("🔨").blue());
+    
     // Detect command type
     let command_details = detect_command_type(&options.command, &options.args);
     debug!("Detected command type: {:?}", command_details);
     
-    // Generate unique image name
-    let image_name = format!("mcp-auto-{}", Uuid::new_v4().to_string().split('-').next().unwrap_or("default"));
+    // Generate deterministic image name based on content hash
+    let image_name = cache_manager.generate_cached_image_name(&content_hash, &format!("{:?}", command_details.cmd_type));
     
     // Create temp directory for Dockerfile
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
@@ -56,7 +96,7 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
         .arg(temp_dir.path());
     
     let build_status = build_command
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .status()
         .context("Failed to execute finch build command")?;
@@ -64,6 +104,17 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
     if !build_status.success() {
         return Err(anyhow::anyhow!("Container build failed with status: {}", build_status));
     }
+    
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &command_key,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", command_details.cmd_type),
+    )?;
+    
+    println!("{} Image cached for future use", style("💾").green());
     
     // Build extra args environment variable if needed
     let mut env_vars = options.env_vars;

@@ -4,12 +4,12 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use log::{debug, info};
 use tempfile::TempDir;
-use uuid::Uuid;
 
 use crate::utils::git_repository::GitRepository;
 use crate::utils::project_detector::{detect_project_type, ProjectType, ProjectInfo};
 use crate::utils::progress::run_build_with_progress;
 use crate::finch::client::{FinchClient, StdioRunOptions};
+use crate::cache::{CacheManager, ContentHasher, hash_build_options};
 
 pub struct GitContainerizeOptions {
     pub repo_url: String,
@@ -32,6 +32,47 @@ pub struct LocalContainerizeOptions {
 pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result<()> {
     use console::style;
     
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the git repository
+    let content_hash = content_hasher.hash_git_repository(&options.repo_url, None)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&options.repo_url, &content_hash, &build_options_hash).await {
+        println!("{} Using cached image: {}", style("⚡").yellow(), style(&cached_image).cyan());
+        info!("Cache hit for git repository: {}", options.repo_url);
+        
+        // Prepare environment variables
+        let mut env_vars = options.env_vars;
+        env_vars.push("MCP_ENABLED=true".to_string());
+        env_vars.push("MCP_STDIO=true".to_string());
+        
+        // Add extra arguments if provided
+        if !options.args.is_empty() {
+            let extra_args = options.args.join(" ");
+            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        }
+        
+        // Run the cached container
+        println!("{} Starting server...\n", style("🚀").green());
+        info!("Running cached containerized git repository");
+        let finch_client = FinchClient::new();
+        let run_options = StdioRunOptions {
+            image_name: cached_image,
+            env_vars,
+            volumes: options.volumes,
+            host_network: options.host_network,
+        };
+        
+        return finch_client.run_stdio_container(&run_options).await;
+    }
+    
+    // Cache miss - need to build
+    println!("{} Cache miss - building container...", style("🔨").blue());
+    
     // Parse and clone the repository
     let mut git_repo = GitRepository::new(&options.repo_url);
     
@@ -47,8 +88,8 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
         return Err(anyhow::anyhow!("Could not detect project type in repository"));
     }
     
-    // Generate unique image name
-    let image_name = format!("mcp-git-{}", Uuid::new_v4().to_string().split('-').next().unwrap_or("default"));
+    // Generate deterministic image name based on content hash
+    let image_name = cache_manager.generate_cached_image_name(&content_hash, &format!("{:?}", project_info.project_type));
     
     // Create temp directory for Dockerfile
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
@@ -98,6 +139,17 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     
     run_build_with_progress(&mut build_command, &image_name, project_type_str)?;
     
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &options.repo_url,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", project_info.project_type),
+    )?;
+    
+    println!("{} Image cached for future use", style("💾").green());
+    
     // Prepare environment variables
     let mut env_vars = options.env_vars;
     env_vars.push("MCP_ENABLED=true".to_string());
@@ -137,6 +189,47 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         return Err(anyhow::anyhow!("Path is not a directory: {}", options.local_path));
     }
     
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the local directory
+    let content_hash = content_hasher.hash_directory(&local_path)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&options.local_path, &content_hash, &build_options_hash).await {
+        println!("{} Using cached image: {}", style("⚡").yellow(), style(&cached_image).cyan());
+        info!("Cache hit for local directory: {}", options.local_path);
+        
+        // Prepare environment variables
+        let mut env_vars = options.env_vars;
+        env_vars.push("MCP_ENABLED=true".to_string());
+        env_vars.push("MCP_STDIO=true".to_string());
+        
+        // Add extra arguments if provided
+        if !options.args.is_empty() {
+            let extra_args = options.args.join(" ");
+            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        }
+        
+        // Run the cached container
+        println!("{} Starting server...\n", style("🚀").green());
+        info!("Running cached containerized local directory");
+        let finch_client = FinchClient::new();
+        let run_options = StdioRunOptions {
+            image_name: cached_image,
+            env_vars,
+            volumes: options.volumes,
+            host_network: options.host_network,
+        };
+        
+        return finch_client.run_stdio_container(&run_options).await;
+    }
+    
+    // Cache miss - need to build
+    println!("{} Cache miss - building container...", style("🔨").blue());
+    
     println!("\n{} Analyzing project...", style("🔍").blue());
     info!("Containerizing local directory: {}", local_path.display());
     
@@ -148,8 +241,8 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         return Err(anyhow::anyhow!("Could not detect project type in directory"));
     }
     
-    // Generate unique image name
-    let image_name = format!("mcp-local-{}", Uuid::new_v4().to_string().split('-').next().unwrap_or("default"));
+    // Generate deterministic image name based on content hash
+    let image_name = cache_manager.generate_cached_image_name(&content_hash, &format!("{:?}", project_info.project_type));
     
     // Create temp directory for Dockerfile
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
@@ -198,6 +291,17 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     build_command.arg(&build_context);
     
     run_build_with_progress(&mut build_command, &image_name, project_type_str)?;
+    
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &options.local_path,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", project_info.project_type),
+    )?;
+    
+    println!("{} Image cached for future use", style("💾").green());
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;

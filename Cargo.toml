@@ -26,6 +26,7 @@ serde = { version = "1.0.196", features = ["derive"] } # Serialization
 serde_json = "1.0.114"      # JSON handling
 tempfile = "3.10.0"         # Temporary file handling
 uuid = { version = "1.6.1", features = ["v4"] } # For generating unique IDs
+sha2 = "0.10.8"             # Cryptographic hashing for content comparison
 
 [dev-dependencies]
 # Testing tools

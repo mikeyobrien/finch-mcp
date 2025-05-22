@@ -94,7 +94,7 @@ impl FinchClient {
         let mut child = Command::new("finch")
             .args(["vm", "init"])
             .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()?;
             
@@ -106,6 +106,29 @@ impl FinchClient {
         } else {
             Err(anyhow::anyhow!("Failed to initialize Finch VM: exit code {}", status))
         }
+    }
+    
+    /// Fast VM check - assumes VM is likely already running
+    pub async fn ensure_vm_running_fast(&self) -> Result<bool> {
+        debug!("Fast VM check for direct container execution");
+        
+        // Try a quick status check first
+        let status = Command::new("finch")
+            .args(["vm", "status"])
+            .output()
+            .await?;
+            
+        let status_text = String::from_utf8_lossy(&status.stdout).to_lowercase();
+        
+        // If already running, return immediately
+        if status_text.contains("running") {
+            debug!("VM is already running");
+            return Ok(true);
+        }
+        
+        // If not running, fall back to full initialization flow
+        debug!("VM not running, falling back to full ensure_vm_running");
+        self.ensure_vm_running().await
     }
     
     /// Ensure Finch VM is running (with automatic initialization if needed)
@@ -137,7 +160,7 @@ impl FinchClient {
         info!("🔄 Starting Finch VM...");
         let mut start_child = Command::new("finch")
             .args(["vm", "start"])
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()?;
             
@@ -153,9 +176,9 @@ impl FinchClient {
     
     /// Run a container in STDIO mode
     pub async fn run_stdio_container(&self, options: &StdioRunOptions) -> Result<()> {
-        // Ensure VM is running (with auto-initialization if needed)
+        // For direct container mode, do a faster VM check
         debug!("Ensuring Finch VM is ready");
-        self.ensure_vm_running().await?;
+        self.ensure_vm_running_fast().await?;
         
         // Build command
         let mut cmd = Command::new("finch");

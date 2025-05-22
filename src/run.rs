@@ -65,7 +65,7 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
     info!("Running MCP server from image: {}", options.image_name);
     
     spinner.succeed("Starting MCP server in STDIO mode...");
-    println!("Connecting to MCP Server...");
+    eprintln!("Connecting to MCP Server...");
     
     // Prepare run options
     let run_options = StdioRunOptions {
@@ -85,7 +85,7 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
             return;
         }
         
-        println!("\nReceived interrupt signal, shutting down...");
+        eprintln!("\nReceived interrupt signal, shutting down...");
         let _ = tx.send(());
     });
     
@@ -106,7 +106,7 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
             // Ctrl+C received
             // The container will be terminated automatically because the process
             // is terminating and the stdio streams will be closed
-            println!("MCP server container terminated");
+            eprintln!("MCP server container terminated");
             Ok(())
         }
     }

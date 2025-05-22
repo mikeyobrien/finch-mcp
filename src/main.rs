@@ -1,8 +1,9 @@
-use finch_mcp::cli::{Cli, Commands};
+use finch_mcp::cli::{Cli, Commands, CacheCommands};
 use finch_mcp::run::run_stdio_container;
 use finch_mcp::core::auto_containerize::auto_containerize_and_run;
 use finch_mcp::core::git_containerize::{git_containerize_and_run, local_containerize_and_run};
 use finch_mcp::finch::client::FinchClient;
+use finch_mcp::cache::CacheManager;
 use log::{info, error};
 
 #[tokio::main]
@@ -38,24 +39,37 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         
+        Commands::Cache { action } => {
+            handle_cache_command(action).await?;
+            Ok(())
+        }
+        
         Commands::Run { .. } => {
-            // Run command 
-            
-            // Print banner
-            println!("Finch-MCP v{}", env!("CARGO_PKG_VERSION"));
-            println!("-------------------------------");
-            
-            // Check if Finch is available early to provide helpful error messages
-            let finch_client = FinchClient::new();
-            if !finch_client.is_finch_available().await? {
-                error!("Finch is not installed or not available");
-                eprintln!("\n❌ Error: Finch is required but not found");
-                eprintln!("📥 Please install Finch from: https://runfinch.com/");
-                eprintln!("💡 Finch is a container runtime that enables finch-mcp to run MCP servers");
-                std::process::exit(1);
+            // For direct container mode, skip banner and do minimal setup
+            if cli.is_direct_container() {
+                let finch_client = FinchClient::new();
+                if !finch_client.is_finch_available().await? {
+                    error!("Finch is not installed or not available");
+                    eprintln!("\n❌ Error: Finch is required but not found");
+                    eprintln!("📥 Please install Finch from: https://runfinch.com/");
+                    std::process::exit(1);
+                }
+                run_target(&cli).await
+            } else {
+                // Non-direct mode - show banner and full setup
+                println!("Finch-MCP v{}", env!("CARGO_PKG_VERSION"));
+                println!("-------------------------------");
+                
+                let finch_client = FinchClient::new();
+                if !finch_client.is_finch_available().await? {
+                    error!("Finch is not installed or not available");
+                    eprintln!("\n❌ Error: Finch is required but not found");
+                    eprintln!("📥 Please install Finch from: https://runfinch.com/");
+                    eprintln!("💡 Finch is a container runtime that enables finch-mcp to run MCP servers");
+                    std::process::exit(1);
+                }
+                run_target(&cli).await
             }
-            
-            run_target(&cli).await
         }
     }
 }
@@ -117,6 +131,67 @@ async fn run_target(cli: &Cli) -> anyhow::Result<()> {
             err
         })?;
         info!("Auto-containerized MCP server exited successfully");
+    }
+    
+    Ok(())
+}
+
+/// Handle cache-related commands
+async fn handle_cache_command(action: &CacheCommands) -> anyhow::Result<()> {
+    use console::style;
+    
+    match action {
+        CacheCommands::Stats => {
+            let cache_manager = CacheManager::new()?;
+            let stats = cache_manager.get_stats();
+            
+            println!("\n{} Cache Statistics", style("📊").blue());
+            println!("Total cached images: {}", style(stats.total_entries).cyan());
+            println!("Estimated disk usage: {:.1} MB", style(stats.estimated_size_bytes as f64 / 1024.0 / 1024.0).yellow());
+            
+            if !stats.project_types.is_empty() {
+                println!("\nCached images by type:");
+                for (project_type, count) in stats.project_types {
+                    println!("  {}: {}", style(&project_type).green(), style(count).cyan());
+                }
+            }
+            
+            if stats.total_entries == 0 {
+                println!("{} No cached images found", style("ℹ️").blue());
+                println!("Run some projects to build up the cache!");
+            }
+        }
+        
+        CacheCommands::Clear { force } => {
+            let mut cache_manager = CacheManager::new()?;
+            let stats = cache_manager.get_stats();
+            
+            if stats.total_entries == 0 {
+                println!("{} Cache is already empty", style("✅").green());
+                return Ok(());
+            }
+            
+            if !force {
+                println!("{} This will remove {} cached images", style("⚠️").yellow(), stats.total_entries);
+                println!("Run with {} to proceed", style("--force").cyan());
+                return Ok(());
+            }
+            
+            cache_manager.clear_cache()?;
+            println!("{} Cleared all {} cached images", style("🗑️").green(), stats.total_entries);
+            println!("Note: Container images may still exist in Finch. Use {} to remove them.", style("finch-mcp cleanup").cyan());
+        }
+        
+        CacheCommands::Cleanup { max_age } => {
+            let mut cache_manager = CacheManager::new()?;
+            let removed_count = cache_manager.cleanup_old_entries(*max_age).await?;
+            
+            if removed_count > 0 {
+                println!("{} Cleaned up {} old cache entries", style("🧹").green(), removed_count);
+            } else {
+                println!("{} No old cache entries to clean up", style("✅").green());
+            }
+        }
     }
     
     Ok(())

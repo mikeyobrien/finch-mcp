@@ -78,6 +78,32 @@ pub enum Commands {
         #[arg(short, long)]
         force: bool,
     },
+    
+    /// Manage build cache
+    Cache {
+        #[command(subcommand)]
+        action: CacheCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CacheCommands {
+    /// Show cache statistics
+    Stats,
+    
+    /// Clear all cached images
+    Clear {
+        /// Force clearing without confirmation
+        #[arg(short, long)]
+        force: bool,
+    },
+    
+    /// Clean up old cache entries
+    Cleanup {
+        /// Maximum age in days for cache entries (default: 7)
+        #[arg(short, long, default_value = "7")]
+        max_age: u64,
+    },
 }
 
 impl Cli {

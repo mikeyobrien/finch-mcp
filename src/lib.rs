@@ -18,6 +18,7 @@ pub mod core {
     pub mod auto_containerize;
     pub mod git_containerize;
 }
+pub mod cache;
 
 // Re-export main types for easier access
 pub use run::{RunOptions, run_stdio_container};
