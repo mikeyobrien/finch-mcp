@@ -1,4 +1,3 @@
-use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandType {
@@ -86,13 +85,13 @@ pub fn generate_dockerfile_content(details: &CommandDetails) -> String {
         CommandType::PythonUvx => {
             let package_name = details.package_name.clone().unwrap_or_default();
             format!(
-                r#"FROM python:3.9-slim
+                r#"FROM python:3.11-slim
 
 # Install uv for package management
 RUN pip install uv
 
 # Install required package
-RUN uv pip install {package_name}
+RUN uv pip install --system {}
 
 # Set environment variables for MCP
 ENV MCP_ENABLED=true
@@ -107,7 +106,7 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
         }
         CommandType::PythonPip => {
             format!(
-                r#"FROM python:3.9-slim
+                r#"FROM python:3.11-slim
 
 # Set environment variables for MCP
 ENV MCP_ENABLED=true
@@ -120,9 +119,9 @@ CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 details.args.join(" ")
             )
         }
-        CommandType::NodeNpm | CommandType::NodeNpx => {
+        CommandType::NodeNpm => {
             format!(
-                r#"FROM node:18-slim
+                r#"FROM node:20-slim
 
 # Set environment variables for MCP
 ENV MCP_ENABLED=true
@@ -133,6 +132,60 @@ CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 details.command,
                 details.args.join(" ")
+            )
+        }
+        CommandType::NodeNpx => {
+            // Special handling for NPX - separate the package from its arguments
+            let (package_and_flags, package_args) = if details.args.len() >= 1 {
+                // Find the package name (first non-flag argument)
+                let mut package_idx = 0;
+                let mut flags = Vec::new();
+                
+                for (i, arg) in details.args.iter().enumerate() {
+                    if arg.starts_with('-') {
+                        flags.push(arg.clone());
+                    } else {
+                        package_idx = i;
+                        break;
+                    }
+                }
+                
+                if package_idx < details.args.len() {
+                    let package_name = &details.args[package_idx];
+                    let remaining_args = if package_idx + 1 < details.args.len() {
+                        details.args[package_idx + 1..].to_vec()
+                    } else {
+                        Vec::new()
+                    };
+                    
+                    let mut full_flags = flags;
+                    full_flags.push(package_name.clone());
+                    (full_flags.join(" "), remaining_args)
+                } else {
+                    (details.args.join(" "), Vec::new())
+                }
+            } else {
+                (details.args.join(" "), Vec::new())
+            };
+            
+            let cmd_args = if !package_args.is_empty() {
+                format!(" {}", package_args.join(" "))
+            } else {
+                String::new()
+            };
+            
+            format!(
+                r#"FROM node:20-slim
+
+# Set environment variables for MCP
+ENV MCP_ENABLED=true
+ENV MCP_STDIO=true
+
+# Run the npx command
+CMD ["sh", "-c", "npx {}{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
+"#,
+                package_and_flags,
+                cmd_args
             )
         }
         CommandType::Generic => {

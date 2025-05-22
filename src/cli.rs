@@ -69,11 +69,30 @@ impl Cli {
     
     /// Convert CLI args to AutoContainerizeOptions
     pub fn to_auto_containerize_options(&self) -> AutoContainerizeOptions {
-        AutoContainerizeOptions {
-            command: self.command.clone(),
-            args: self.args.clone(),
-            env_vars: self.env.clone().unwrap_or_default(),
-            volumes: self.volume.clone().unwrap_or_default(),
+        // Check if the command looks like a quoted command string
+        // (contains spaces and common command patterns)
+        if self.args.is_empty() && (
+            self.command.contains(" -") || 
+            self.command.contains(" @") || 
+            self.command.starts_with("npx ") ||
+            self.command.starts_with("uvx ")
+        ) {
+            // Parse as a quoted command string
+            let (parsed_command, parsed_args) = crate::utils::command_parser::parse_command_string(&self.command);
+            AutoContainerizeOptions {
+                command: parsed_command,
+                args: parsed_args,
+                env_vars: self.env.clone().unwrap_or_default(),
+                volumes: self.volume.clone().unwrap_or_default(),
+            }
+        } else {
+            // Use as separate command and args
+            AutoContainerizeOptions {
+                command: self.command.clone(),
+                args: self.args.clone(),
+                env_vars: self.env.clone().unwrap_or_default(),
+                volumes: self.volume.clone().unwrap_or_default(),
+            }
         }
     }
     

@@ -9,16 +9,10 @@ pub mod templates {
 }
 pub mod utils {
     pub mod command_detector;
-    pub mod package_manager;
-    pub mod template_processor;
-    pub mod mcp_detector;
+    pub mod command_parser;
 }
 pub mod core {
     pub mod auto_containerize;
-    pub mod create;
-    pub mod dev;
-    pub mod run;
-    pub mod publish;
 }
 
 // Re-export main types for easier access

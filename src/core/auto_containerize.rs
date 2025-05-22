@@ -7,7 +7,7 @@ use log::{debug, info};
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use crate::utils::command_detector::{detect_command_type, generate_dockerfile_content, CommandDetails};
+use crate::utils::command_detector::{detect_command_type, generate_dockerfile_content, CommandDetails, CommandType};
 use crate::finch::client::{FinchClient, StdioRunOptions};
 
 pub struct AutoContainerizeOptions {
@@ -58,8 +58,14 @@ pub async fn auto_containerize_and_run(options: AutoContainerizeOptions) -> Resu
     // Build extra args environment variable if needed
     let mut env_vars = options.env_vars;
     
-    // Check if we need to pass any arguments that weren't included in the Dockerfile's CMD
-    if !options.args.is_empty() {
+    // For some command types (like NPX), arguments are already built into the CMD
+    // Only add EXTRA_ARGS for command types that use the ${EXTRA_ARGS} placeholder generically
+    let should_add_extra_args = match command_details.cmd_type {
+        CommandType::NodeNpx => false, // NPX args already built into CMD
+        _ => !options.args.is_empty(), // Other commands can use EXTRA_ARGS
+    };
+    
+    if should_add_extra_args {
         let extra_args = options.args.join(" ");
         env_vars.push(format!("EXTRA_ARGS={}", extra_args));
     }

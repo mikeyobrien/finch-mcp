@@ -11,12 +11,19 @@ finch-mcp now supports automatic containerization of MCP servers. This feature a
 Instead of building your own Docker image, you can simply run a command like:
 
 ```bash
+# Simple command format
 finch-mcp-stdio uvx mcp-server-time --local-timezone UTC
+
+# Quoted command format (recommended for complex commands)
+finch-mcp-stdio "uvx mcp-server-time --local-timezone UTC"
+
+# NPX commands with volume mounts
+finch-mcp-stdio -v /host/path:/container/path "npx @package /container/path"
 ```
 
 The tool will:
-- Detect that you're running a Python/uvx command
-- Create a Python container image
+- Detect the command type (Python/uvx, Node.js/npx, etc.)
+- Create an appropriate container image
 - Install the necessary dependencies
 - Run the command with the provided arguments in STDIO mode
 
@@ -25,15 +32,32 @@ The tool will:
 The auto-containerization feature currently supports:
 
 - **Python Commands**:
-  - `uvx` - For UVx package manager commands (recommended for MCP time server)
+  - `uvx` - For UVx package manager commands (uses Python 3.11-slim)
   - `pip` - For pip package manager commands
 
 - **Node.js Commands**:
-  - `npm` - For npm package manager commands
-  - `npx` - For npx commands
+  - `npm` - For npm package manager commands (uses Node.js 20-slim)
+  - `npx` - For npx commands with intelligent argument parsing
 
 - **Generic Commands**:
   - Any other command type will use a generic Debian base image
+
+## Quoted Command Support
+
+For complex commands with flags and arguments, use quoted strings:
+
+```bash
+# Without quotes (simple)
+finch-mcp-stdio uvx mcp-server-time
+
+# With quotes (recommended for complex commands)
+finch-mcp-stdio "npx -y @modelcontextprotocol/server-filesystem /workspace"
+```
+
+The quoted format is especially useful for:
+- Commands with flags (like `-y` for NPX)
+- Package names with special characters (like `@scope/package`)
+- Multiple arguments that should stay together
 
 ## Example: Running the MCP Time Server
 
@@ -52,17 +76,47 @@ This will:
 4. Run the server with the specified timezone
 5. Connect the STDIO streams
 
+## Example: Running the MCP Filesystem Server
+
+The filesystem server provides file operations and requires volume mounting:
+
+```bash
+finch-mcp-stdio -v /local/project:/workspace "npx @modelcontextprotocol/server-filesystem /workspace"
+```
+
+This command:
+1. Creates a Node.js 20 container
+2. Installs the filesystem server package via NPX
+3. Mounts your local project directory as `/workspace`
+4. Runs the server with access to the mounted files
+
 ## Using with Claude Code
 
-To use this with Claude Code, create a configuration like:
-
+**Time Server Configuration:**
 ```json
 {
   "mcp": {
     "servers": {
       "time": {
         "command": "/path/to/finch-mcp-stdio",
-        "args": ["uvx", "mcp-server-time", "--local-timezone", "UTC"]
+        "args": ["uvx mcp-server-time --local-timezone UTC"]
+      }
+    }
+  }
+}
+```
+
+**Filesystem Server Configuration:**
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "command": "/path/to/finch-mcp-stdio",
+        "args": [
+          "-v", "${workspaceFolder}:/workspace",
+          "npx @modelcontextprotocol/server-filesystem /workspace"
+        ]
       }
     }
   }

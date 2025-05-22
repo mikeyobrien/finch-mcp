@@ -98,20 +98,54 @@ OPTIONS:
 The MCP time server provides time-related functionality:
 
 ```bash
+# Simple command
 finch-mcp-stdio uvx mcp-server-time --local-timezone America/New_York
+
+# Quoted command (recommended for complex commands)
+finch-mcp-stdio "uvx mcp-server-time --local-timezone America/New_York"
+```
+
+### Running the MCP Filesystem Server
+
+The filesystem server provides file operations with volume mounting:
+
+```bash
+# NPX with volume mount
+finch-mcp-stdio -v /local/path:/workspace "npx @modelcontextprotocol/server-filesystem /workspace"
+
+# With NPX flags
+finch-mcp-stdio -v ./:/workspace "npx -y @modelcontextprotocol/server-filesystem /workspace"
 ```
 
 ### Using with Claude Code
 
 Configure Claude Code to use finch-mcp-stdio:
 
+**Time Server:**
 ```json
 {
   "mcp": {
     "servers": {
       "time": {
         "command": "/path/to/finch-mcp-stdio",
-        "args": ["uvx", "mcp-server-time", "--local-timezone", "UTC"]
+        "args": ["uvx mcp-server-time --local-timezone UTC"]
+      }
+    }
+  }
+}
+```
+
+**Filesystem Server:**
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "command": "/path/to/finch-mcp-stdio",
+        "args": [
+          "-v", "${workspaceFolder}:/workspace",
+          "npx @modelcontextprotocol/server-filesystem /workspace"
+        ]
       }
     }
   }
