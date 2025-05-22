@@ -250,10 +250,10 @@ fn parse_pyproject_toml(content: &str) -> Result<ProjectInfo> {
         if line.contains("python = ") || line.contains("requires-python = ") {
             if let Some(version_part) = line.split('=').nth(1) {
                 let version = version_part.trim().trim_matches('"');
-                if version.starts_with(">=") {
-                    python_version = Some(version[2..].to_string());
-                } else if version.starts_with("^") {
-                    python_version = Some(version[1..].to_string());
+                if let Some(stripped) = version.strip_prefix(">=") {
+                    python_version = Some(stripped.to_string());
+                } else if let Some(stripped) = version.strip_prefix("^") {
+                    python_version = Some(stripped.to_string());
                 }
             }
         }
@@ -396,21 +396,17 @@ fn normalize_node_version(version_str: &str) -> String {
     let version = version_str.trim();
     
     // Remove common version range operators and extract the base version
-    let normalized = if version.starts_with(">=") {
+    let normalized = if let Some(base_version) = version.strip_prefix(">=") {
         // >=18 -> 18, >=18.0.0 -> 18
-        let base_version = &version[2..];
         extract_major_version(base_version)
-    } else if version.starts_with("^") {
+    } else if let Some(base_version) = version.strip_prefix("^") {
         // ^18.0.0 -> 18
-        let base_version = &version[1..];
         extract_major_version(base_version)
-    } else if version.starts_with("~") {
+    } else if let Some(base_version) = version.strip_prefix("~") {
         // ~18.14 -> 18 
-        let base_version = &version[1..];
         extract_major_version(base_version)
-    } else if version.starts_with("=") {
+    } else if let Some(base_version) = version.strip_prefix("=") {
         // =18.0.0 -> 18
-        let base_version = &version[1..];
         extract_major_version(base_version)
     } else if version.contains(" || ") {
         // ">=16 || >=18" -> take the first range and normalize it
@@ -433,7 +429,7 @@ fn normalize_node_version(version_str: &str) -> String {
     if let Ok(major_version) = normalized.parse::<u32>() {
         // Node.js major versions typically range from 14-22 (as of 2024)
         // If it's within reasonable bounds, use it; otherwise default to 20
-        if major_version >= 14 && major_version <= 30 {
+        if (14..=30).contains(&major_version) {
             major_version.to_string()
         } else {
             "20".to_string()

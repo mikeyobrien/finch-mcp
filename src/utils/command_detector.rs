@@ -84,6 +84,7 @@ pub fn generate_dockerfile_content(details: &CommandDetails) -> String {
     match details.cmd_type {
         CommandType::PythonUvx => {
             let package_name = details.package_name.clone().unwrap_or_default();
+            let command_with_args = format!("{} {}", details.command, details.args.join(" "));
             format!(
                 r#"FROM python:3.11-slim
 
@@ -101,7 +102,7 @@ ENV MCP_STDIO=true
 CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 package_name,
-                format!("{} {}", details.command, details.args.join(" "))
+                command_with_args
             )
         }
         CommandType::PythonPip => {
@@ -136,7 +137,7 @@ CMD ["sh", "-c", "{} {} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
         }
         CommandType::NodeNpx => {
             // Special handling for NPX - separate the package from its arguments
-            let (package_and_flags, package_args) = if details.args.len() >= 1 {
+            let (package_and_flags, package_args) = if !details.args.is_empty() {
                 // Find the package name (first non-flag argument)
                 let mut package_idx = 0;
                 let mut flags = Vec::new();

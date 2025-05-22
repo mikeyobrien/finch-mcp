@@ -21,6 +21,7 @@ pub struct StdioRunOptions {
 }
 
 /// Client for interacting with Finch container CLI
+#[derive(Default)]
 pub struct FinchClient {}
 
 impl FinchClient {
