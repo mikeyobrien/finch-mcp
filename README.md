@@ -40,37 +40,37 @@ Download the latest pre-built binary for your platform from the [Releases page](
 #### macOS
 ```bash
 # Intel Macs
-curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-macos-x86_64.tar.gz
-tar -xzf finch-mcp-stdio.tar.gz
-chmod +x finch-mcp-stdio
-sudo mv finch-mcp-stdio /usr/local/bin/
+curl -L -o finch-mcp.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-macos-x86_64.tar.gz
+tar -xzf finch-mcp.tar.gz
+chmod +x finch-mcp
+sudo mv finch-mcp /usr/local/bin/
 
 # Apple Silicon (M1/M2/M3)
-curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-macos-aarch64.tar.gz
-tar -xzf finch-mcp-stdio.tar.gz
-chmod +x finch-mcp-stdio
-sudo mv finch-mcp-stdio /usr/local/bin/
+curl -L -o finch-mcp.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-macos-aarch64.tar.gz
+tar -xzf finch-mcp.tar.gz
+chmod +x finch-mcp
+sudo mv finch-mcp /usr/local/bin/
 ```
 
 #### Linux
 ```bash
 # x86_64
-curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-linux-x86_64.tar.gz
-tar -xzf finch-mcp-stdio.tar.gz
-chmod +x finch-mcp-stdio
-sudo mv finch-mcp-stdio /usr/local/bin/
+curl -L -o finch-mcp.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-linux-x86_64.tar.gz
+tar -xzf finch-mcp.tar.gz
+chmod +x finch-mcp
+sudo mv finch-mcp /usr/local/bin/
 
 # ARM64
-curl -L -o finch-mcp-stdio.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-stdio-linux-aarch64.tar.gz
-tar -xzf finch-mcp-stdio.tar.gz
-chmod +x finch-mcp-stdio
-sudo mv finch-mcp-stdio /usr/local/bin/
+curl -L -o finch-mcp.tar.gz https://github.com/mikeyobrien/finch-mcp/releases/latest/download/finch-mcp-linux-aarch64.tar.gz
+tar -xzf finch-mcp.tar.gz
+chmod +x finch-mcp
+sudo mv finch-mcp /usr/local/bin/
 ```
 
 #### Windows
-1. Download `finch-mcp-stdio-windows-x86_64.exe.zip` from the [Releases page](https://github.com/mikeyobrien/finch-mcp/releases)
+1. Download `finch-mcp-windows-x86_64.exe.zip` from the [Releases page](https://github.com/mikeyobrien/finch-mcp/releases)
 2. Extract the zip file
-3. Move `finch-mcp-stdio.exe` to a directory in your PATH
+3. Move `finch-mcp.exe` to a directory in your PATH
 
 ### From Source
 
@@ -82,7 +82,7 @@ cd finch-mcp
 cargo build --release
 ```
 
-The compiled binary will be available at `target/release/finch-mcp-stdio`.
+The compiled binary will be available at `target/release/finch-mcp`.
 
 ### Using Cargo
 
@@ -92,20 +92,78 @@ cargo install --git https://github.com/mikeyobrien/finch-mcp.git
 
 ## Usage
 
+### Two-Step Process: Build Then Run
+
+For better performance and integration with MCP clients, finch-mcp supports a two-step process:
+
+#### Step 1: Build the Container
+Build your MCP server into a container image:
+
+```bash
+# From a local directory
+finch-mcp build ./my-mcp-project
+
+# From a git repository
+finch-mcp build https://github.com/user/mcp-server-repo
+
+# From a command (auto-containerization)
+finch-mcp build uvx mcp-server-time
+finch-mcp build "npx @modelcontextprotocol/server-memory"
+```
+
+This will:
+1. Build the container image with a simplified name format: `mcp-{name}:{hash}`
+2. Tag it with `latest` for easy reference
+3. Output the MCP configuration JSON to add to your client
+
+Example output:
+```
+📋 MCP Server Configuration:
+Add this to your MCP client configuration:
+────────────────────────────────────────────────────────────
+{
+  "my-server": {
+    "command": "finch-mcp",
+    "args": [
+      "run",
+      "mcp-my-server:abc123"
+    ],
+    "env": {}
+  }
+}
+────────────────────────────────────────────────────────────
+
+🐳 Container image: mcp-my-server:abc123
+🏷️ Latest tag: mcp-my-server:latest
+```
+
+#### Step 2: Run the Built Container
+Use the configuration from step 1 in your MCP client, or run directly:
+
+```bash
+# Run with specific hash
+finch-mcp run mcp-my-server:abc123
+
+# Run with latest tag
+finch-mcp run mcp-my-server:latest
+```
+
 ### Direct Container Mode
 
 Run an existing MCP server Docker image:
 
 ```bash
-finch-mcp-stdio --direct my-mcp-image:latest
+finch-mcp run my-mcp-image:latest
 ```
+
+The tool automatically detects when you're running a container image versus a command or directory.
 
 ### Auto-Containerization Mode (NEW!)
 
 Run an MCP server command directly:
 
 ```bash
-finch-mcp-stdio uvx mcp-server-time --local-timezone UTC
+finch-mcp run uvx mcp-server-time --local-timezone UTC
 ```
 
 This will automatically:
@@ -148,29 +206,50 @@ This will automatically:
 ### With Environment Variables
 
 ```bash
-finch-mcp-stdio uvx mcp-server-time -e API_KEY=xyz123 -e DEBUG=true
+finch-mcp run uvx mcp-server-time -e API_KEY=xyz123 -e DEBUG=true
 ```
 
 ### With Volume Mounts
 
 ```bash
-finch-mcp-stdio uvx mcp-server-time -v /host/path:/container/path
+finch-mcp run uvx mcp-server-time -v /host/path:/container/path
 ```
 
 ### Full Options
 
 ```bash
+# Run command
 USAGE:
-    finch-mcp-stdio [OPTIONS] <COMMAND> [ARGS]...
+    finch-mcp run [OPTIONS] <TARGET> [ARGS]...
 
 ARGS:
-    <COMMAND>       MCP server image, command, git repository URL, or local directory to run
+    <TARGET>        MCP server image, command, git repository URL, or local directory to run
     [ARGS]...       Arguments for the command
 
 OPTIONS:
     -e, --env <KEY=VALUE>...                Environment variables to pass to the container
     -v, --volume <HOST_PATH:CONTAINER_PATH>...    Mount volumes in the container
     --direct                               Skip auto-containerization (treat command as Docker image)
+    --host-network                         Use host network for package registry access
+    --forward-registry                     Forward registry configuration from host
+    -f, --force                            Force rebuild even if cached image exists
+    -h, --help                             Print help information
+    -V, --verbose                          Enable verbose logging (repeat for more verbosity)
+
+# Build command
+USAGE:
+    finch-mcp build [OPTIONS] <TARGET> [ARGS]...
+
+ARGS:
+    <TARGET>        Local directory, git repository, or command to build
+    [ARGS]...       Arguments for the build
+
+OPTIONS:
+    -e, --env <KEY=VALUE>...                Environment variables to pass to the container
+    -v, --volume <HOST_PATH:CONTAINER_PATH>...    Mount volumes in the container
+    --host-network                         Use host network for package registry access
+    --forward-registry                     Forward registry configuration from host
+    -f, --force                            Force rebuild even if cached image exists
     -h, --help                             Print help information
     -V, --verbose                          Enable verbose logging (repeat for more verbosity)
 ```
@@ -182,11 +261,11 @@ OPTIONS:
 The MCP time server provides time-related functionality:
 
 ```bash
-# Simple command
-finch-mcp-stdio uvx mcp-server-time --local-timezone America/New_York
+# Build first
+finch-mcp build uvx mcp-server-time --local-timezone America/New_York
 
-# Quoted command (recommended for complex commands)
-finch-mcp-stdio "uvx mcp-server-time --local-timezone America/New_York"
+# Then use the configuration output or run directly
+finch-mcp run mcp-uvx:latest --direct
 ```
 
 ### Running the MCP Filesystem Server
@@ -194,41 +273,43 @@ finch-mcp-stdio "uvx mcp-server-time --local-timezone America/New_York"
 The filesystem server provides file operations with volume mounting:
 
 ```bash
-# NPX with volume mount
-finch-mcp-stdio -v /local/path:/workspace "npx @modelcontextprotocol/server-filesystem /workspace"
+# Build with volume specification
+finch-mcp build -v /local/path:/workspace "npx @modelcontextprotocol/server-filesystem /workspace"
 
-# With NPX flags
-finch-mcp-stdio -v ./:/workspace "npx -y @modelcontextprotocol/server-filesystem /workspace"
+# Run the built container with volume mount
+finch-mcp run mcp-npx:latest --direct -v /local/path:/workspace
 ```
 
-### Using with Claude Code
+### MCP Client Configuration
 
-Configure Claude Code to use finch-mcp-stdio:
+Configure your MCP client to use finch-mcp:
 
-**Time Server:**
+**Time Server (after building):**
 ```json
 {
   "mcp": {
     "servers": {
       "time": {
-        "command": "/path/to/finch-mcp-stdio",
-        "args": ["uvx mcp-server-time --local-timezone UTC"]
+        "command": "finch-mcp",
+        "args": ["run", "mcp-uvx:latest"],
+        "env": {}
       }
     }
   }
 }
 ```
 
-**Filesystem Server:**
+**Filesystem Server (with volume mount):**
 ```json
 {
   "mcp": {
     "servers": {
       "filesystem": {
-        "command": "/path/to/finch-mcp-stdio",
+        "command": "finch-mcp",
         "args": [
-          "-v", "${workspaceFolder}:/workspace",
-          "npx @modelcontextprotocol/server-filesystem /workspace"
+          "run",
+          "mcp-filesystem:latest",
+          "-v", "${workspaceFolder}:/workspace"
         ]
       }
     }
@@ -279,10 +360,10 @@ For more details, see [Auto-Containerization Documentation](./docs/auto-containe
 
 ### First-time Finch Setup
 
-If you're using Finch for the first time, `finch-mcp-stdio` will automatically initialize the VM:
+If you're using Finch for the first time, `finch-mcp` will automatically initialize the VM:
 
 ```bash
-finch-mcp-stdio uvx mcp-server-time
+finch-mcp run uvx mcp-server-time
 # Output:
 # 🚀 Initializing Finch VM for first-time use...
 # This may take a few minutes to download and set up the VM.

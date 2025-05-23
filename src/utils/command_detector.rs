@@ -146,8 +146,8 @@ ENV MCP_ENABLED=true \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Create non-root user
-RUN addgroup -g 1000 -S mcp && \
-    adduser -u 1000 -S mcp -G mcp
+RUN addgroup -g 1001 -S mcp && \
+    adduser -u 1001 -S mcp -G mcp
 
 USER mcp
 
@@ -173,8 +173,8 @@ ENV MCP_ENABLED=true \
     NPM_CONFIG_LOGLEVEL=warn
 
 # Create non-root user
-RUN addgroup -g 1000 -S mcp && \
-    adduser -u 1000 -S mcp -G mcp
+RUN addgroup -g 1001 -S mcp && \
+    adduser -u 1001 -S mcp -G mcp
 
 USER mcp
 
@@ -244,8 +244,8 @@ ENV MCP_ENABLED=true \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 
 # Create non-root user
-RUN addgroup -g 1000 -S mcp && \
-    adduser -u 1000 -S mcp -G mcp
+RUN addgroup -g 1001 -S mcp && \
+    adduser -u 1001 -S mcp -G mcp
 
 USER mcp
 
@@ -277,8 +277,8 @@ ENV MCP_ENABLED=true \
     MCP_STDIO=true
 
 # Create non-root user
-RUN addgroup -g 1000 -S mcp && \
-    adduser -u 1000 -S mcp -G mcp
+RUN addgroup -g 1001 -S mcp && \
+    adduser -u 1001 -S mcp -G mcp
 
 USER mcp
 

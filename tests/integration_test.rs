@@ -64,7 +64,7 @@ async fn test_finch_client_integration() {
     
     // This should succeed but we'll ignore errors
     // since this is just a basic integration check
-    let _ = client.run_stdio_container(&run_options).await;
+    let _ = client.run_stdio_container(&run_options, None).await;
 }
 
 // This test checks that our CLI properly parses arguments

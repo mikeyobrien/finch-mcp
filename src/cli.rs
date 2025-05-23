@@ -29,9 +29,13 @@ pub struct Cli {
     #[arg(short = 'V', long, action = ArgAction::Count, global = true)]
     pub verbose: u8,
     
-    /// Skip auto-containerization (treat the command as a Docker image directly)
+    /// Force treating target as a container image (usually auto-detected)
     #[arg(long, global = true)]
     pub direct: bool,
+    
+    /// Force rebuild even if cached image exists
+    #[arg(short, long, global = true)]
+    pub force: bool,
     
     /// Use host network for package registry access
     #[arg(long, global = true)]
@@ -51,6 +55,15 @@ pub enum Commands {
         target: String,
         
         /// Arguments for the command (when containerizing a command)
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    /// Build a container image without running it
+    Build {
+        /// Local directory or git repository to build
+        target: String,
+        
+        /// Arguments for the build
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
@@ -175,19 +188,21 @@ impl Cli {
         cli
     }
     
-    /// Get the target string (for run operations)
+    /// Get the target string (for run and build operations)
     pub fn get_target(&self) -> &str {
         match &self.command {
             Commands::Run { target, .. } => target,
-            _ => unreachable!("Only run command should call this"),
+            Commands::Build { target, .. } => target,
+            _ => unreachable!("Only run/build commands should call this"),
         }
     }
     
-    /// Get the args (for run operations)  
+    /// Get the args (for run and build operations)  
     pub fn get_args(&self) -> &[String] {
         match &self.command {
             Commands::Run { args, .. } => args,
-            _ => unreachable!("Only run command should call this"),
+            Commands::Build { args, .. } => args,
+            _ => unreachable!("Only run/build commands should call this"),
         }
     }
     
@@ -222,6 +237,7 @@ impl Cli {
                 volumes: self.volume.clone().unwrap_or_default(),
                 host_network: self.host_network,
                 forward_registry: self.forward_registry,
+                force_rebuild: self.force,
             }
         } else {
             // Use as separate command and args
@@ -232,6 +248,7 @@ impl Cli {
                 volumes: self.volume.clone().unwrap_or_default(),
                 host_network: self.host_network,
                 forward_registry: self.forward_registry,
+                force_rebuild: self.force,
             }
         }
     }
@@ -245,6 +262,7 @@ impl Cli {
             volumes: self.volume.clone().unwrap_or_default(),
             host_network: self.host_network,
             forward_registry: self.forward_registry,
+            force_rebuild: self.force,
         }
     }
     
@@ -257,6 +275,7 @@ impl Cli {
             volumes: self.volume.clone().unwrap_or_default(),
             host_network: self.host_network,
             forward_registry: self.forward_registry,
+            force_rebuild: self.force,
         }
     }
     
@@ -373,6 +392,7 @@ mod tests {
             volume: Some(vec!["/host:/container".to_string()]),
             verbose: 0,
             direct: true,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -395,6 +415,7 @@ mod tests {
             volume: Some(vec!["/host:/container".to_string()]),
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -419,6 +440,7 @@ mod tests {
             volume: None,
             verbose: 0,
             direct: true,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -434,6 +456,7 @@ mod tests {
             volume: None,
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -449,6 +472,7 @@ mod tests {
             volume: None,
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -467,6 +491,7 @@ mod tests {
             volume: None,
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -482,6 +507,7 @@ mod tests {
             volume: None,
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -497,6 +523,7 @@ mod tests {
             volume: None,
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };
@@ -514,6 +541,7 @@ mod tests {
             volume: Some(vec!["/host:/container".to_string()]),
             verbose: 0,
             direct: false,
+            force: false,
             host_network: false,
             forward_registry: false,
         };

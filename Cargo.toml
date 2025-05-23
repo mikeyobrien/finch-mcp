@@ -30,6 +30,7 @@ toml = "0.8"                # TOML handling
 tempfile = "3.10.0"         # Temporary file handling
 uuid = { version = "1.6.1", features = ["v4"] } # For generating unique IDs
 sha2 = "0.10.8"             # Cryptographic hashing for content comparison
+crossbeam-channel = "0.5"   # Channel for thread communication
 
 [dev-dependencies]
 # Testing tools

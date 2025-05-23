@@ -5,7 +5,7 @@ use std::path::Path;
 use tokio::signal::ctrl_c;
 
 use crate::finch::client::{FinchClient, StdioRunOptions};
-use crate::{status, output};
+use crate::output;
 
 /// Options for running an MCP server container in STDIO mode
 #[derive(Debug, Clone)]
@@ -69,6 +69,18 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
         return Err(anyhow::anyhow!("Finch is not installed or not available. Please install Finch from https://runfinch.com/"));
     }
     
+    // Check if the image exists
+    if !finch_client.image_exists(&options.image_name).await? {
+        spinner.fail("Container image not found");
+        use console::style;
+        eprintln!("{} Container image not found: {}", style("❌").red(), style(&options.image_name).yellow());
+        eprintln!("\n{} Available options:", style("💡").yellow());
+        eprintln!("  1. Build it first: {}", style("finch-mcp build <target>").cyan());
+        eprintln!("  2. Pull from registry: {}", style(format!("finch pull {}", &options.image_name)).cyan());
+        eprintln!("  3. List available images: {}", style("finch-mcp list").cyan());
+        return Err(anyhow::anyhow!("Container image '{}' not found", options.image_name));
+    }
+    
     // Log the MCP server we're about to run
     info!("Running MCP server from image: {}", options.image_name);
     
@@ -103,7 +115,7 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
     
     // Run the container in a separate task so we can handle interrupts
     let container_task = tokio::spawn(async move {
-        finch_client.run_stdio_container(&run_options).await
+        finch_client.run_stdio_container(&run_options, None).await
     });
     
     // Wait for either the container to finish or a ctrl+c signal

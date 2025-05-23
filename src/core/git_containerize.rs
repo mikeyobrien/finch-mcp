@@ -4,6 +4,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use log::{debug, info};
 use tempfile::TempDir;
+use serde_json::json;
 
 use crate::utils::git_repository::GitRepository;
 use crate::utils::project_detector::{detect_project_type, ProjectType, ProjectInfo};
@@ -21,6 +22,7 @@ pub struct GitContainerizeOptions {
     pub volumes: Vec<String>,
     pub host_network: bool,
     pub forward_registry: bool,
+    pub force_rebuild: bool,
 }
 
 pub struct LocalContainerizeOptions {
@@ -30,6 +32,7 @@ pub struct LocalContainerizeOptions {
     pub volumes: Vec<String>,
     pub host_network: bool,
     pub forward_registry: bool,
+    pub force_rebuild: bool,
 }
 
 pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result<()> {
@@ -45,32 +48,36 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&options.repo_url, &content_hash, &build_options_hash).await {
-        status!("⚡ Using cached image: {}", style(&cached_image).cyan());
-        info!("Cache hit for git repository: {}", options.repo_url);
-        
-        // Prepare environment variables
-        let mut env_vars = options.env_vars;
-        env_vars.push("MCP_ENABLED=true".to_string());
-        env_vars.push("MCP_STDIO=true".to_string());
-        
-        // Add extra arguments if provided
-        if !options.args.is_empty() {
-            let extra_args = options.args.join(" ");
-            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        if options.force_rebuild {
+            status!("🔨 Force rebuild requested, ignoring cached image: {}", style(&cached_image).cyan());
+            info!("Force rebuild for git repository: {}", options.repo_url);
+        } else {
+            status!("⚡ Using cached image: {}", style(&cached_image).cyan());
+            status!("💡 To rebuild, use: {}", style("finch-mcp run --force <target>").yellow());
+            info!("Cache hit for git repository: {}", options.repo_url);
+            
+            // Prepare environment variables (MCP env vars are added by finch client)
+            let mut env_vars = options.env_vars;
+            
+            // Add extra arguments if provided
+            if !options.args.is_empty() {
+                let extra_args = options.args.join(" ");
+                env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+            }
+            
+            // Run the cached container
+            status!("🚀 Starting server...\n");
+            info!("Running cached containerized git repository");
+            let finch_client = FinchClient::new();
+            let run_options = StdioRunOptions {
+                image_name: cached_image,
+                env_vars,
+                volumes: options.volumes,
+                host_network: options.host_network,
+            };
+            
+            return finch_client.run_stdio_container(&run_options, None).await;
         }
-        
-        // Run the cached container
-        status!("🚀 Starting server...\n");
-        info!("Running cached containerized git repository");
-        let finch_client = FinchClient::new();
-        let run_options = StdioRunOptions {
-            image_name: cached_image,
-            env_vars,
-            volumes: options.volumes,
-            host_network: options.host_network,
-        };
-        
-        return finch_client.run_stdio_container(&run_options).await;
     }
     
     // Cache miss - need to build
@@ -177,6 +184,19 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     
     build_result?;
     
+    // Tag the image with 'latest' as well
+    let base_name = image_name.split(':').next().unwrap_or(&image_name);
+    let latest_tag = format!("{}:latest", base_name);
+    
+    let tag_command = Command::new("finch")
+        .args(["tag", &image_name, &latest_tag])
+        .status()
+        .context("Failed to tag image with latest")?;
+    
+    if !tag_command.success() {
+        log::warn!("Failed to tag image with latest");
+    }
+    
     // Store in cache after successful build
     cache_manager.store_cache_entry(
         &options.repo_url,
@@ -187,6 +207,9 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     )?;
     
     status!("💾 Image cached for future use");
+    
+    // Output MCP configuration
+    output_mcp_config(&options.repo_url, &image_name, &options.env_vars)?;
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;
@@ -210,7 +233,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
         host_network: options.host_network,
     };
     
-    finch_client.run_stdio_container(&run_options).await
+    finch_client.run_stdio_container(&run_options, Some(temp_dir.path())).await
 }
 
 pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Result<()> {
@@ -240,32 +263,43 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&options.local_path, &content_hash, &build_options_hash).await {
-        status!("⚡ Using cached image: {}", style(&cached_image).cyan());
-        info!("Cache hit for local directory: {}", options.local_path);
-        
-        // Prepare environment variables
-        let mut env_vars = options.env_vars;
-        env_vars.push("MCP_ENABLED=true".to_string());
-        env_vars.push("MCP_STDIO=true".to_string());
-        
-        // Add extra arguments if provided
-        if !options.args.is_empty() {
-            let extra_args = options.args.join(" ");
-            env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+        if options.force_rebuild {
+            if !crate::output::is_quiet_mode() {
+                status!("🔨 Force rebuild requested, ignoring cached image: {}", style(&cached_image).cyan());
+            }
+            info!("Force rebuild for local directory: {}", options.local_path);
+        } else {
+            // In MCP mode, suppress all output to avoid corrupting the protocol
+            if !crate::output::is_quiet_mode() {
+                status!("⚡ Using cached image: {}", style(&cached_image).cyan());
+                status!("💡 To rebuild, use: {}", style("finch-mcp run --force <target>").yellow());
+            }
+            info!("Cache hit for local directory: {}", options.local_path);
+            
+            // Prepare environment variables (MCP env vars are added by finch client)
+            let mut env_vars = options.env_vars;
+            
+            // Add extra arguments if provided
+            if !options.args.is_empty() {
+                let extra_args = options.args.join(" ");
+                env_vars.push(format!("EXTRA_ARGS={}", extra_args));
+            }
+            
+            // Run the cached container
+            if !crate::output::is_quiet_mode() {
+                status!("🚀 Starting server...\n");
+            }
+            info!("Running cached containerized local directory");
+            let finch_client = FinchClient::new();
+            let run_options = StdioRunOptions {
+                image_name: cached_image,
+                env_vars,
+                volumes: options.volumes,
+                host_network: options.host_network,
+            };
+            
+            return finch_client.run_stdio_container(&run_options, None).await;
         }
-        
-        // Run the cached container
-        status!("🚀 Starting server...\n");
-        info!("Running cached containerized local directory");
-        let finch_client = FinchClient::new();
-        let run_options = StdioRunOptions {
-            image_name: cached_image,
-            env_vars,
-            volumes: options.volumes,
-            host_network: options.host_network,
-        };
-        
-        return finch_client.run_stdio_container(&run_options).await;
     }
     
     // Cache miss - need to build
@@ -300,8 +334,14 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
+    // Load finch-mcp config if present
+    let finch_config = FinchConfig::load_from_dir(&local_path)?;
+    if finch_config.is_some() {
+        info!("Found .finch-mcp configuration file");
+    }
+    
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, finch_config.as_ref())?;
     debug!("Generated Dockerfile:\n{}", dockerfile_content);
     
     // Write Dockerfile
@@ -362,6 +402,19 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     
     build_result?;
     
+    // Tag the image with 'latest' as well
+    let base_name = image_name.split(':').next().unwrap_or(&image_name);
+    let latest_tag = format!("{}:latest", base_name);
+    
+    let tag_command = Command::new("finch")
+        .args(["tag", &image_name, &latest_tag])
+        .status()
+        .context("Failed to tag image with latest")?;
+    
+    if !tag_command.success() {
+        log::warn!("Failed to tag image with latest");
+    }
+    
     // Store in cache after successful build
     cache_manager.store_cache_entry(
         &options.local_path,
@@ -372,6 +425,9 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     )?;
     
     status!("💾 Image cached for future use");
+    
+    // Output MCP configuration
+    output_mcp_config(&options.local_path, &image_name, &options.env_vars)?;
     
     // Prepare environment variables
     let mut env_vars = options.env_vars;
@@ -395,7 +451,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
         host_network: options.host_network,
     };
     
-    finch_client.run_stdio_container(&run_options).await
+    finch_client.run_stdio_container(&run_options, Some(temp_dir.path())).await
 }
 
 /// Git containerize and run for MCP clients (build-then-run in one step)
@@ -412,10 +468,8 @@ pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Re
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&options.repo_url, &content_hash, &build_options_hash).await {
-        // Run the cached container directly in MCP mode
+        // Run the cached container directly in MCP mode (MCP env vars are added by finch client)
         let mut env_vars = options.env_vars;
-        env_vars.push("MCP_ENABLED=true".to_string());
-        env_vars.push("MCP_STDIO=true".to_string());
         
         if !options.args.is_empty() {
             let extra_args = options.args.join(" ");
@@ -430,7 +484,7 @@ pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Re
             host_network: options.host_network,
         };
         
-        return finch_client.run_stdio_container(&run_options).await;
+        return finch_client.run_stdio_container(&run_options, None).await;
     }
     
     // Build the image first (with suppressed output for MCP)
@@ -484,11 +538,15 @@ pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Re
     }
     
     build_command
-        .arg(&build_context)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .arg(&build_context);
     
-    let build_status = build_command.status().context("Failed to execute finch build command")?;
+    // Don't suppress output in MCP mode as it can interfere with stdio setup
+    // Instead, let stderr show build progress while keeping stdout clean
+    let build_status = build_command
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .context("Failed to execute finch build command")?;
     let build_duration = build_start.elapsed().as_secs();
     
     if !build_status.success() {
@@ -527,7 +585,7 @@ pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Re
         host_network: options.host_network,
     };
     
-    finch_client.run_stdio_container(&run_options).await
+    finch_client.run_stdio_container(&run_options, Some(temp_dir.path())).await
 }
 
 /// Local containerize and run for MCP clients (build-then-run in one step)
@@ -558,10 +616,8 @@ pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -
     
     // Check if we have a cached image
     if let Some(cached_image) = cache_manager.get_cached_image(&options.local_path, &content_hash, &build_options_hash).await {
-        // Run the cached container directly in MCP mode
+        // Run the cached container directly in MCP mode (MCP env vars are added by finch client)
         let mut env_vars = options.env_vars;
-        env_vars.push("MCP_ENABLED=true".to_string());
-        env_vars.push("MCP_STDIO=true".to_string());
         
         if !options.args.is_empty() {
             let extra_args = options.args.join(" ");
@@ -576,7 +632,7 @@ pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -
             host_network: options.host_network,
         };
         
-        return finch_client.run_stdio_container(&run_options).await;
+        return finch_client.run_stdio_container(&run_options, None).await;
     }
     
     // Build the image first (with suppressed output for MCP)
@@ -604,8 +660,14 @@ pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -
     let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
+    // Load finch-mcp config if present
+    let finch_config = FinchConfig::load_from_dir(&local_path)?;
+    if finch_config.is_some() {
+        info!("Found .finch-mcp configuration file");
+    }
+    
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, finch_config.as_ref())?;
     fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
     
     // Create build context and copy local directory contents
@@ -626,11 +688,15 @@ pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -
     }
     
     build_command
-        .arg(&build_context)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .arg(&build_context);
     
-    let build_status = build_command.status().context("Failed to execute finch build command")?;
+    // Don't suppress output in MCP mode as it can interfere with stdio setup
+    // Instead, let stderr show build progress while keeping stdout clean
+    let build_status = build_command
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .status()
+        .context("Failed to execute finch build command")?;
     let build_duration = build_start.elapsed().as_secs();
     
     if !build_status.success() {
@@ -669,7 +735,7 @@ pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -
         host_network: options.host_network,
     };
     
-    finch_client.run_stdio_container(&run_options).await
+    finch_client.run_stdio_container(&run_options, Some(temp_dir.path())).await
 }
 
 fn get_registry_config(forward_registry: bool, project_type: &ProjectType) -> Vec<String> {
@@ -724,6 +790,90 @@ fn get_registry_config(forward_registry: bool, project_type: &ProjectType) -> Ve
     }
     
     config_lines
+}
+
+/// Generate Dockerfile steps to modify package.json for selective dependency installation
+fn generate_package_json_modification_steps(config: &FinchConfig, _package_manager: &str) -> Result<String> {
+    if config.dependencies.install_all {
+        // If installing all, don't modify
+        return Ok(String::new());
+    }
+    
+    let mut steps = Vec::new();
+    
+    steps.push("\n# Selectively install dependencies".to_string());
+    steps.push("# Save original package.json".to_string());
+    steps.push("RUN cp package.json package.json.original".to_string());
+    
+    // Create a Node.js script to modify package.json
+    let script = format!(r#"
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+
+// Keep track of what we're doing
+console.log('Original devDependencies:', Object.keys(pkg.devDependencies || {{}}));
+
+// Handle includes
+const includes = {includes};
+const skips = {skips};
+
+// Helper to check if a dependency matches a pattern
+function matchesPattern(dep, pattern) {{
+    if (pattern.includes('*')) {{
+        // Convert glob pattern to regex
+        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+        return regex.test(dep);
+    }}
+    return dep === pattern;
+}}
+
+if (pkg.devDependencies) {{
+    const originalDevDeps = {{...pkg.devDependencies}};
+    
+    // If we have specific includes, keep only those
+    if (includes.length > 0) {{
+        pkg.devDependencies = {{}};
+        for (const dep of includes) {{
+            if (originalDevDeps[dep]) {{
+                pkg.devDependencies[dep] = originalDevDeps[dep];
+            }}
+        }}
+    }}
+    
+    // Remove any skips (supporting glob patterns)
+    for (const pattern of skips) {{
+        for (const dep of Object.keys(pkg.devDependencies)) {{
+            if (matchesPattern(dep, pattern)) {{
+                delete pkg.devDependencies[dep];
+                console.log('Removing:', dep, '(matched pattern:', pattern, ')');
+            }}
+        }}
+    }}
+    
+    console.log('Modified devDependencies:', Object.keys(pkg.devDependencies));
+}}
+
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+"#,
+        includes = serde_json::to_string(&config.dependencies.include).unwrap_or_else(|_| "[]".to_string()),
+        skips = serde_json::to_string(&config.dependencies.skip).unwrap_or_else(|_| "[]".to_string())
+    );
+    
+    // Write the script to a file
+    steps.push(format!(
+        "RUN echo '{}' > /tmp/modify-deps.js",
+        script.replace('\'', r"'\''").replace('\n', r"\n")
+    ));
+    
+    // Run the script
+    steps.push("RUN node /tmp/modify-deps.js".to_string());
+    
+    // Clean up
+    steps.push("RUN rm /tmp/modify-deps.js".to_string());
+    
+    steps.push("".to_string()); // Empty line for readability
+    
+    Ok(steps.join("\n"))
 }
 
 fn generate_dockerfile_for_project(project_info: &ProjectInfo, args: &[String], forward_registry: bool, config: Option<&FinchConfig>) -> Result<String> {
@@ -932,6 +1082,19 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 format!("\n# Registry configuration\n{}\n", registry_config.join("\n"))
             };
             
+            // Generate package.json modification steps if needed
+            let package_json_steps = if let Some(cfg) = config {
+                if !cfg.dependencies.install_all && 
+                   (!cfg.dependencies.include.is_empty() || !cfg.dependencies.skip.is_empty()) {
+                    // We need to selectively install dependencies
+                    generate_package_json_modification_steps(cfg, package_manager)?
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            
             // Generate appropriate build and install steps
             let (build_steps, install_steps) = if has_bin_command {
                 (
@@ -964,7 +1127,7 @@ WORKDIR /app
 {}{}
 # Copy project files
 COPY . .
-
+{}
 # Install dependencies
 RUN {}
 
@@ -978,6 +1141,7 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 node_version,
                 registry_section,
                 pre_install_section,
+                package_json_steps,
                 install_command,
                 build_steps,
                 install_steps,
@@ -1191,4 +1355,387 @@ mod tests {
         assert!(dockerfile.contains("my-server"));
         assert!(!dockerfile.contains("node ./bin/server.js")); // Should use bin command, not direct file
     }
+}
+
+/// Build a container from a git repository without running it
+pub async fn git_build(options: GitContainerizeOptions) -> Result<String> {
+    use console::style;
+    
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the git repository
+    let content_hash = content_hasher.hash_git_repository(&options.repo_url, None)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&options.repo_url, &content_hash, &build_options_hash).await {
+        if options.force_rebuild {
+            status!("🔨 Force rebuild requested, ignoring cached image: {}", style(&cached_image).cyan());
+            info!("Force rebuild for git repository: {}", options.repo_url);
+        } else {
+            status!("⚡ Image already built: {}", style(&cached_image).cyan());
+            status!("💡 To rebuild, use: {}", style("finch-mcp build --force <target>").yellow());
+            info!("Cache hit for git repository: {}", options.repo_url);
+            
+            // Output MCP configuration
+            output_mcp_config(&options.repo_url, &cached_image, &options.env_vars)?;
+            
+            return Ok(cached_image);
+        }
+    }
+    
+    // Cache miss or force rebuild - need to build
+    status!("🔨 Building container...");
+    
+    // Initialize logging
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("git", &options.repo_url)?;
+    let build_start = std::time::Instant::now();
+    
+    // Parse and clone the repository
+    let mut git_repo = GitRepository::new(&options.repo_url);
+    
+    status!("\n🔄 Cloning repository...");
+    info!("Cloning repository: {}", git_repo.url);
+    let repo_path = git_repo.clone_to_temp_quiet(crate::output::is_quiet_mode()).await?;
+    
+    // Detect the project type
+    let project_info = detect_project_type(&repo_path)?;
+    debug!("Detected project: {:?}", project_info);
+    
+    if project_info.project_type == ProjectType::Unknown {
+        return Err(anyhow::anyhow!("Could not detect project type in repository"));
+    }
+    
+    // Load finch-mcp config if present
+    let finch_config = FinchConfig::load_from_dir(&repo_path)?;
+    if finch_config.is_some() {
+        info!("Found .finch-mcp configuration file");
+    }
+    
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&options.repo_url);
+    let image_name = cache_manager.generate_smart_image_name(
+        "git",
+        &format!("{:?}", project_info.project_type),
+        &identifier,
+        &content_hash
+    );
+    
+    // Create temp directory for Dockerfile
+    let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
+    let dockerfile_path = temp_dir.path().join("Dockerfile");
+    
+    // Generate Dockerfile content based on project type
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
+    debug!("Generated Dockerfile:\n{}", dockerfile_content);
+    
+    // Write Dockerfile
+    fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
+    info!("Created Dockerfile at: {:?}", dockerfile_path);
+    
+    // Copy repository contents to build context
+    let build_context = temp_dir.path().join("context");
+    fs::create_dir_all(&build_context).context("Failed to create build context directory")?;
+    
+    // Copy repository files to build context
+    copy_dir_all(&repo_path, &build_context).context("Failed to copy repository to build context")?;
+    
+    // Copy Dockerfile to build context
+    fs::copy(&dockerfile_path, build_context.join("Dockerfile"))?;
+    
+    // Build the container image with progress tracking
+    let project_type_str = match project_info.project_type {
+        ProjectType::NodeJs | ProjectType::NodeJsMonorepo => "Node.js",
+        ProjectType::PythonPoetry => "Python (Poetry)",
+        ProjectType::PythonUv => "Python (uv)",
+        ProjectType::PythonSetupPy => "Python (setup.py)",
+        ProjectType::PythonRequirements => "Python (requirements.txt)",
+        ProjectType::Rust => "Rust",
+        ProjectType::Unknown => "Unknown",
+    };
+    
+    let mut build_command = Command::new("finch");
+    build_command
+        .arg("build")
+        .arg("-t")
+        .arg(&image_name);
+    
+    // Add host network option if enabled
+    if options.host_network {
+        build_command.arg("--network").arg("host");
+    }
+    
+    build_command.arg(&build_context);
+    
+    // Log build command
+    log_manager.append_to_log(&log_filename, &format!("Build command: {:?}", build_command))?;
+    
+    let build_result = run_build_with_progress(&mut build_command, &image_name, project_type_str);
+    
+    let build_duration = build_start.elapsed().as_secs();
+    
+    match &build_result {
+        Ok(_) => {
+            log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+            log_manager.finish_build_log(&log_filename, true, build_duration)?;
+        }
+        Err(e) => {
+            log_manager.append_to_log(&log_filename, &format!("Build failed: {}", e))?;
+            log_manager.finish_build_log(&log_filename, false, build_duration)?;
+        }
+    }
+    
+    build_result?;
+    
+    // Tag the image with 'latest' as well
+    let base_name = image_name.split(':').next().unwrap_or(&image_name);
+    let latest_tag = format!("{}:latest", base_name);
+    
+    let tag_command = Command::new("finch")
+        .args(["tag", &image_name, &latest_tag])
+        .status()
+        .context("Failed to tag image with latest")?;
+    
+    if !tag_command.success() {
+        log::warn!("Failed to tag image with latest");
+    }
+    
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &options.repo_url,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", project_info.project_type),
+    )?;
+    
+    status!("💾 Image cached for future use");
+    
+    // Output MCP configuration
+    output_mcp_config(&options.repo_url, &image_name, &options.env_vars)?;
+    
+    Ok(image_name)
+}
+
+/// Build a container from a local directory without running it
+pub async fn local_build(options: LocalContainerizeOptions) -> Result<String> {
+    use console::style;
+    
+    let local_path = PathBuf::from(&options.local_path);
+    
+    // Validate that the path exists and is a directory
+    if !local_path.exists() {
+        return Err(anyhow::anyhow!("Path does not exist: {}", options.local_path));
+    }
+    
+    if !local_path.is_dir() {
+        return Err(anyhow::anyhow!("Path is not a directory: {}", options.local_path));
+    }
+    
+    // Initialize cache and content hasher
+    let mut cache_manager = CacheManager::new()?;
+    let content_hasher = ContentHasher::new();
+    
+    // Generate content hash for the local directory
+    let content_hash = content_hasher.hash_directory(&local_path)?;
+    let build_options_hash = hash_build_options(options.host_network, options.forward_registry, &options.env_vars);
+    
+    // Check if we have a cached image
+    if let Some(cached_image) = cache_manager.get_cached_image(&options.local_path, &content_hash, &build_options_hash).await {
+        if options.force_rebuild {
+            status!("🔨 Force rebuild requested, ignoring cached image: {}", style(&cached_image).cyan());
+            info!("Force rebuild for local directory: {}", options.local_path);
+        } else {
+            status!("⚡ Image already built: {}", style(&cached_image).cyan());
+            status!("💡 To rebuild, use: {}", style("finch-mcp build --force <target>").yellow());
+            info!("Cache hit for local directory: {}", options.local_path);
+            
+            // Output MCP configuration
+            output_mcp_config(&options.local_path, &cached_image, &options.env_vars)?;
+            
+            return Ok(cached_image);
+        }
+    }
+    
+    // Cache miss or force rebuild - need to build
+    status!("🔨 Building container...");
+    
+    // Initialize logging
+    let log_manager = LogManager::new()?;
+    let log_filename = log_manager.log_build_start("local", &options.local_path)?;
+    let build_start = std::time::Instant::now();
+    
+    status!("\n🔍 Analyzing project...");
+    info!("Containerizing local directory: {}", local_path.display());
+    
+    // Detect the project type
+    let project_info = detect_project_type(&local_path)?;
+    debug!("Detected project: {:?}", project_info);
+    
+    if project_info.project_type == ProjectType::Unknown {
+        return Err(anyhow::anyhow!("Could not detect project type in directory"));
+    }
+    
+    // Generate smart, human-readable image name
+    let identifier = CacheManager::extract_identifier(&options.local_path);
+    let image_name = cache_manager.generate_smart_image_name(
+        "local",
+        &format!("{:?}", project_info.project_type),
+        &identifier,
+        &content_hash
+    );
+    
+    // Create temp directory for Dockerfile
+    let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
+    let dockerfile_path = temp_dir.path().join("Dockerfile");
+    
+    // Load finch-mcp config if present
+    let finch_config = FinchConfig::load_from_dir(&local_path)?;
+    if finch_config.is_some() {
+        info!("Found .finch-mcp configuration file");
+    }
+    
+    // Generate Dockerfile content based on project type
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, finch_config.as_ref())?;
+    debug!("Generated Dockerfile:\n{}", dockerfile_content);
+    
+    // Write Dockerfile
+    fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
+    info!("Created Dockerfile at: {:?}", dockerfile_path);
+    
+    // Create build context and copy local directory contents
+    let build_context = temp_dir.path().join("context");
+    fs::create_dir_all(&build_context).context("Failed to create build context directory")?;
+    
+    // Copy local directory files to build context
+    copy_dir_all(&local_path, &build_context).context("Failed to copy local directory to build context")?;
+    
+    // Copy Dockerfile to build context
+    fs::copy(&dockerfile_path, build_context.join("Dockerfile"))?;
+    
+    // Build the container image with progress tracking
+    let project_type_str = match project_info.project_type {
+        ProjectType::NodeJs | ProjectType::NodeJsMonorepo => "Node.js",
+        ProjectType::PythonPoetry => "Python (Poetry)",
+        ProjectType::PythonUv => "Python (uv)",
+        ProjectType::PythonSetupPy => "Python (setup.py)",
+        ProjectType::PythonRequirements => "Python (requirements.txt)",
+        ProjectType::Rust => "Rust",
+        ProjectType::Unknown => "Unknown",
+    };
+    
+    let mut build_command = Command::new("finch");
+    build_command
+        .arg("build")
+        .arg("-t")
+        .arg(&image_name);
+    
+    // Add host network option if enabled
+    if options.host_network {
+        build_command.arg("--network").arg("host");
+    }
+    
+    build_command.arg(&build_context);
+    
+    // Log build command
+    log_manager.append_to_log(&log_filename, &format!("Build command: {:?}", build_command))?;
+    
+    let build_result = run_build_with_progress(&mut build_command, &image_name, project_type_str);
+    
+    let build_duration = build_start.elapsed().as_secs();
+    
+    match &build_result {
+        Ok(_) => {
+            log_manager.append_to_log(&log_filename, "Build completed successfully")?;
+            log_manager.finish_build_log(&log_filename, true, build_duration)?;
+        }
+        Err(e) => {
+            log_manager.append_to_log(&log_filename, &format!("Build failed: {}", e))?;
+            log_manager.finish_build_log(&log_filename, false, build_duration)?;
+        }
+    }
+    
+    build_result?;
+    
+    // Tag the image with 'latest' as well
+    let base_name = image_name.split(':').next().unwrap_or(&image_name);
+    let latest_tag = format!("{}:latest", base_name);
+    
+    let tag_command = Command::new("finch")
+        .args(["tag", &image_name, &latest_tag])
+        .status()
+        .context("Failed to tag image with latest")?;
+    
+    if !tag_command.success() {
+        log::warn!("Failed to tag image with latest");
+    }
+    
+    // Store in cache after successful build
+    cache_manager.store_cache_entry(
+        &options.local_path,
+        &content_hash,
+        &build_options_hash,
+        &image_name,
+        &format!("{:?}", project_info.project_type),
+    )?;
+    
+    status!("💾 Image cached for future use");
+    
+    // Output MCP configuration
+    output_mcp_config(&options.local_path, &image_name, &options.env_vars)?;
+    
+    Ok(image_name)
+}
+
+/// Output MCP configuration for MCP clients
+fn output_mcp_config(source_path: &str, image_name: &str, env_vars: &[String]) -> Result<()> {
+    use console::style;
+    
+    // Extract the server name from the path
+    let server_name = CacheManager::extract_identifier(source_path)
+        .to_lowercase()
+        .replace('_', "-");
+    
+    // Parse environment variables into a map
+    let mut env_map = serde_json::Map::new();
+    for env_var in env_vars {
+        if let Some((key, value)) = env_var.split_once('=') {
+            env_map.insert(key.to_string(), json!(value));
+        }
+    }
+    
+    // Build the configuration object
+    let config = json!({
+        server_name: {
+            "command": "finch-mcp",
+            "args": [
+                "run",
+                image_name
+            ],
+            "env": env_map
+        }
+    });
+    
+    // Pretty print the configuration
+    let config_str = serde_json::to_string_pretty(&config)?;
+    
+    println!("\n{} MCP Server Configuration:", style("📋").blue());
+    println!("{}", style("Add this to your MCP client configuration:").dim());
+    println!("{}", style("─".repeat(60)).dim());
+    println!("{}", config_str);
+    println!("{}", style("─".repeat(60)).dim());
+    
+    // Add helpful notes about environment variables and arguments
+    println!("\n{} Configuration Notes:", style("💡").yellow());
+    println!("• Environment variables: Check the MCP server's documentation for supported env vars");
+    println!("• Server arguments: Pass additional args via EXTRA_ARGS environment variable");
+    println!("  Example: \"env\": {{ \"EXTRA_ARGS\": \"--port 8080 --verbose\" }}");
+    
+    println!("\n{} Container image: {}", style("🐳").cyan(), style(image_name).green());
+    println!("{} Latest tag: {}", style("🏷️").yellow(), style(format!("{}:latest", image_name.split(':').next().unwrap_or(image_name))).green());
+    
+    Ok(())
 }

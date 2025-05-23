@@ -23,6 +23,7 @@ pub mod core {
 pub mod cache;
 pub mod logging;
 pub mod output;
+pub mod mcp;
 
 // Re-export main types for easier access
 pub use run::{RunOptions, run_stdio_container};

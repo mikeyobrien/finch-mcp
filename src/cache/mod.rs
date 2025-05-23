@@ -227,28 +227,21 @@ impl CacheManager {
         format!("mcp-cache-{}-{}", project_type.to_lowercase(), short_hash)
     }
     
-    /// Generate a smart, human-readable image name
+    /// Generate a smart, human-readable image name with tag
     pub fn generate_smart_image_name(&self, 
-        source_type: &str, 
-        project_type: &str, 
+        _source_type: &str, 
+        _project_type: &str, 
         identifier: &str, 
         content_hash: &str
     ) -> String {
-        // Take first 8 characters of hash for readability
-        let short_hash = &content_hash[..8.min(content_hash.len())];
+        // Take first 8 characters of hash as tag
+        let tag = &content_hash[..8.min(content_hash.len())];
         
         // Sanitize identifier to be Docker-safe
         let clean_identifier = Self::sanitize_docker_name(identifier);
         
-        // Sanitize project type
-        let clean_project_type = Self::sanitize_docker_name(project_type);
-        
-        format!("mcp-{}-{}-{}-{}", 
-            source_type.to_lowercase(),
-            clean_project_type,
-            clean_identifier,
-            short_hash
-        )
+        // Simple name: mcp-{identifier}:{tag}
+        format!("mcp-{}:{}", clean_identifier, tag)
     }
     
     /// Sanitize a string to be safe for Docker image names

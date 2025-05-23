@@ -17,6 +17,10 @@ pub struct FinchConfig {
     /// Dependencies configuration
     #[serde(default)]
     pub dependencies: DependenciesConfig,
+    
+    /// MCP-specific configuration
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -79,6 +83,49 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfig {
+    /// Maximum time to wait for server startup (in seconds)
+    #[serde(default = "default_startup_timeout")]
+    pub startup_timeout: u64,
+    
+    /// Maximum buffer size for client messages (in bytes)
+    #[serde(default = "default_buffer_size")]
+    pub buffer_size: usize,
+    
+    /// Pattern to detect server readiness
+    #[serde(default = "default_readiness_pattern")]
+    pub readiness_pattern: String,
+    
+    /// Enable message buffering (default: true)
+    #[serde(default = "default_true")]
+    pub enable_buffering: bool,
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            startup_timeout: default_startup_timeout(),
+            buffer_size: default_buffer_size(),
+            readiness_pattern: default_readiness_pattern(),
+            enable_buffering: true,
+        }
+    }
+}
+
+fn default_startup_timeout() -> u64 {
+    30 // 30 seconds
+}
+
+fn default_buffer_size() -> usize {
+    1024 * 1024 // 1MB
+}
+
+fn default_readiness_pattern() -> String {
+    "initialize".to_string()
+}
+
 impl FinchConfig {
     /// Load config from a directory
     pub fn load_from_dir(dir: &Path) -> Result<Option<Self>> {
@@ -139,9 +186,9 @@ impl FinchConfig {
             };
         }
         
-        // For now, if auto-detect is enabled but we don't have package.json,
-        // or if we have any includes, install all dependencies
-        if !self.dependencies.include.is_empty() {
+        // If we have includes or skips, we'll modify package.json and then install
+        // So we can use regular install (which will install modified deps)
+        if !self.dependencies.include.is_empty() || !self.dependencies.skip.is_empty() {
             return match package_manager {
                 "pnpm" => "pnpm install".to_string(),
                 "yarn" => "yarn install".to_string(),
@@ -173,7 +220,7 @@ mod tests {
         let config = FinchConfig::default();
         assert!(!config.build.skip);
         assert!(!config.dependencies.install_all);
-        assert!(config.dependencies.include_dev.is_empty());
+        assert!(config.dependencies.include.is_empty());
     }
     
     #[test]
@@ -181,7 +228,7 @@ mod tests {
         let yaml = r#"
 dependencies:
   installAll: true
-  includeDev:
+  include:
     - typescript
     - "@types/node"
 build:
@@ -189,7 +236,7 @@ build:
 "#;
         let config: FinchConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.dependencies.install_all);
-        assert_eq!(config.dependencies.include_dev.len(), 2);
+        assert_eq!(config.dependencies.include.len(), 2);
         assert_eq!(config.build.command, Some("npm run custom-build".to_string()));
     }
 }

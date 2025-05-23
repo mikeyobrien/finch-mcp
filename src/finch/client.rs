@@ -4,6 +4,14 @@ use tokio::process::Command;
 use log::{info, warn, debug};
 use console::style;
 use crate::{status, output};
+use crate::core::finch_config::FinchConfig;
+use crate::mcp::buffer::MCPBuffer;
+use crate::mcp::async_proxy::AsyncStdioProxy;
+use std::sync::Arc;
+use std::time::Duration;
+use std::path::Path;
+use tokio::io::{AsyncReadExt};
+use std::io::Write;
 
 /// Options for running a container in STDIO mode
 #[derive(Debug, Clone)]
@@ -183,9 +191,158 @@ impl FinchClient {
         }
     }
     
-    /// Run a container in STDIO mode
-    pub async fn run_stdio_container(&self, options: &StdioRunOptions) -> Result<()> {
-        // For direct container mode, do a faster VM check
+    /// Run a container in STDIO mode  
+    pub async fn run_stdio_container(&self, options: &StdioRunOptions, project_dir: Option<&Path>) -> Result<()> {
+        self.run_stdio_container_with_flags(options, project_dir, false).await
+    }
+    
+    /// Run a container with buffered stdin for MCP mode
+    pub async fn run_stdio_container_buffered(&self, options: &StdioRunOptions, project_dir: Option<&Path>) -> Result<()> {
+        // In MCP mode, buffer stdin while the container starts
+        if output::is_quiet_mode() {
+            use tokio::sync::mpsc;
+            use std::sync::Mutex;
+            
+            // Create a channel to buffer stdin
+            let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+            let buffer = Arc::new(Mutex::new(Vec::new()));
+            let buffer_clone = buffer.clone();
+            
+            // Spawn a task to read from stdin and buffer it
+            let stdin_reader = tokio::spawn(async move {
+                let mut stdin = tokio::io::stdin();
+                let mut buf = vec![0u8; 4096];
+                
+                loop {
+                    match stdin.read(&mut buf).await {
+                        Ok(0) => break, // EOF
+                        Ok(n) => {
+                            let data = buf[..n].to_vec();
+                            buffer_clone.lock().unwrap().extend_from_slice(&data);
+                            if tx.send(data).is_err() {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            
+            // Start the container with piped stdin
+            let mut cmd = std::process::Command::new("finch");
+            cmd.arg("run")
+               .arg("--rm")
+               .arg("-i")
+               .arg("-e")
+               .arg("MCP_ENABLED=true")
+               .arg("-e")
+               .arg("MCP_STDIO=true");
+            
+            // Add custom environment variables
+            for env in &options.env_vars {
+                cmd.arg("-e").arg(env);
+            }
+            
+            // Add volume mounts
+            for volume in &options.volumes {
+                cmd.arg("-v").arg(volume);
+            }
+            
+            // Add host network if enabled
+            if options.host_network {
+                cmd.arg("--network").arg("host");
+            }
+            
+            // Add image name
+            cmd.arg(&options.image_name);
+            
+            // Spawn with piped stdin
+            let mut child = cmd
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()?;
+            
+            // Wait a moment for the server to start
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            
+            // Now replay the buffered input
+            if let Some(mut stdin) = child.stdin.take() {
+                let buffered_data = buffer.lock().unwrap().clone();
+                if !buffered_data.is_empty() {
+                    stdin.write_all(&buffered_data)?;
+                    stdin.flush()?;
+                }
+                
+                // Continue forwarding stdin
+                tokio::spawn(async move {
+                    while let Some(data) = rx.recv().await {
+                        if stdin.write_all(&data).is_err() {
+                            break;
+                        }
+                        if stdin.flush().is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            
+            // Cancel the stdin reader
+            stdin_reader.abort();
+            
+            // Wait for the container
+            let status = child.wait()?;
+            
+            if status.success() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("Container exited with non-zero status code: {}", status))
+            }
+        } else {
+            // Non-MCP mode, use regular execution
+            self.run_stdio_container_with_flags(options, project_dir, false).await
+        }
+    }
+    
+    /// Run a container in STDIO mode with additional control flags
+    pub async fn run_stdio_container_with_flags(&self, options: &StdioRunOptions, project_dir: Option<&Path>, _disable_proxy: bool) -> Result<()> {
+        // In MCP mode, exec immediately without any checks
+        if output::is_quiet_mode() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                
+                // Build and exec immediately
+                let mut cmd = std::process::Command::new("finch");
+                cmd.arg("run")
+                   .arg("--rm")
+                   .arg("-i")
+                   .arg("-e")
+                   .arg("MCP_ENABLED=true")
+                   .arg("-e")
+                   .arg("MCP_STDIO=true");
+                
+                for env in &options.env_vars {
+                    cmd.arg("-e").arg(env);
+                }
+                
+                for volume in &options.volumes {
+                    cmd.arg("-v").arg(volume);
+                }
+                
+                if options.host_network {
+                    cmd.arg("--network").arg("host");
+                }
+                
+                cmd.arg(&options.image_name);
+                
+                // Replace the current process immediately
+                let err = cmd.exec();
+                return Err(anyhow::anyhow!("Failed to exec finch: {}", err));
+            }
+        }
+        
+        // For non-MCP mode, do VM check
         debug!("Ensuring Finch VM is ready");
         self.ensure_vm_running_fast().await?;
         
@@ -217,23 +374,68 @@ impl FinchClient {
         // Add image name
         cmd.arg(&options.image_name);
         
-        // Run with stdio inheritance for piping
-        log::debug!("Running finch command: {:?}", cmd);
+        // Load finch config if available
+        let finch_config = if let Some(dir) = project_dir {
+            FinchConfig::load_from_dir(dir)?.unwrap_or_default()
+        } else {
+            FinchConfig::default()
+        };
         
-        let mut child = cmd
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()?;
+        // Disable MCP buffering entirely to fix STDIO communication issues
+        // The MCP proxy was interfering with proper STDIO handling for MCP servers
+        let should_use_proxy = false;
         
-        // Wait for the process to complete
-        let status = child.wait().await?;
-        
-        if status.success() {
+        if should_use_proxy {
+            // Run with proxy for MCP mode
+            log::debug!("Running finch command with MCP proxy: {:?}", cmd);
+            
+            let child = cmd
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?;
+            
+            // Create buffer and proxy
+            let buffer = Arc::new(MCPBuffer::new(
+                finch_config.mcp.buffer_size,
+                Duration::from_secs(finch_config.mcp.startup_timeout)
+            ));
+            
+            let proxy = AsyncStdioProxy::new(buffer.clone(), child)?;
+            
+            // Start the proxy
+            proxy.start().await?;
+            
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Container exited with non-zero status code: {}", status))
+            // Run with direct stdio inheritance
+            log::debug!("Running finch command with direct stdio: {:?}", cmd);
+            
+            let mut child = cmd
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()?;
+            
+            // Wait for the process to complete
+            let status = child.wait().await?;
+            
+            if status.success() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("Container exited with non-zero status code: {}", status))
+            }
         }
+    }
+    
+    /// Check if a container image exists
+    pub async fn image_exists(&self, image_name: &str) -> Result<bool> {
+        let output = Command::new("finch")
+            .args(["image", "inspect", image_name])
+            .output()
+            .await?;
+        
+        Ok(output.status.success())
     }
     
     /// List finch-mcp containers and images
@@ -244,9 +446,9 @@ impl FinchClient {
         // List containers
         status!("\n{} Containers:", style("🐳").cyan());
         let container_args = if show_all {
-            vec!["ps", "-a", "--filter", "name=mcp-", "--format", "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
+            vec!["ps", "-a", "--filter", "name=mcp-", "--format", "{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
         } else {
-            vec!["ps", "--filter", "name=mcp-", "--format", "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
+            vec!["ps", "--filter", "name=mcp-", "--format", "{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
         };
         
         let container_output = Command::new("finch")
@@ -268,7 +470,7 @@ impl FinchClient {
         // List images
         status!("\n{} Images:", style("💿").green());
         let image_output = Command::new("finch")
-            .args(["images", "--filter", "reference=mcp-*", "--format", "table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}"])
+            .args(["images", "--filter", "reference=mcp-*", "--format", "{{.Repository}}\\t{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}"])
             .output()
             .await?;
             
