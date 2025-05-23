@@ -514,6 +514,7 @@ mod tests {
             volumes: vec![],
             host_network: false,
             forward_registry: false,
+            force_rebuild: false,
         };
         
         let result = auto_containerize_and_run(options).await;

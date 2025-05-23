@@ -347,15 +347,15 @@ mod tests {
         
         // Test git repository
         let name = manager.generate_smart_image_name("git", "NodeJs", "my-server", "abcdef123456");
-        assert_eq!(name, "mcp-git-nodejs-my-server-abcdef12");
+        assert_eq!(name, "mcp-my-server:abcdef12");
         
         // Test with special characters
         let name = manager.generate_smart_image_name("local", "Python", "My App/Server", "123456789abc");
-        assert_eq!(name, "mcp-local-python-my-app-server-12345678");
+        assert_eq!(name, "mcp-my-app-server:12345678");
         
         // Test auto command
         let name = manager.generate_smart_image_name("auto", "UVX", "time-server", "fedcba987654");
-        assert_eq!(name, "mcp-auto-uvx-time-server-fedcba98");
+        assert_eq!(name, "mcp-time-server:fedcba98");
     }
     
     #[test]

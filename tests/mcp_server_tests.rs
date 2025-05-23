@@ -25,6 +25,7 @@ async fn test_mcp_server_stdio_communication() {
         volumes: vec![],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     // This test verifies that the MCP server can be containerized and started
@@ -198,6 +199,7 @@ async fn test_mcp_server_volume_mounting() {
         volumes: vec![format!("{}:/app/data", data_dir.display())],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     // Test that volume mounting works in containerized environment
@@ -222,6 +224,7 @@ fn test_mcp_server_network_configuration() {
         volumes: vec![],
         host_network: true,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     assert!(host_network_config.host_network);
@@ -234,6 +237,7 @@ fn test_mcp_server_network_configuration() {
         volumes: vec![],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     assert!(!bridge_network_config.host_network);

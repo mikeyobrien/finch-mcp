@@ -160,6 +160,7 @@ async fn test_auto_containerization_filesystem() {
         volumes: vec![],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     // This tests the filesystem operations involved in containerization

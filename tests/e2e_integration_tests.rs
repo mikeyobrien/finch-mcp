@@ -44,6 +44,7 @@ async fn test_e2e_auto_containerization_workflow() {
         volumes: vec![],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     // Run with timeout to prevent hanging
@@ -74,6 +75,7 @@ async fn test_e2e_git_repository_workflow() {
         volumes: vec![],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     // Run with timeout
@@ -286,6 +288,7 @@ async fn test_e2e_auto_containerization_filesystem() {
         volumes: vec![],
         host_network: false,
         forward_registry: false,
+        force_rebuild: false,
     };
     
     // This tests the filesystem operations involved in containerization
