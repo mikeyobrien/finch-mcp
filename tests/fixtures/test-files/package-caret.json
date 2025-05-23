@@ -1,0 +1,6 @@
+{
+  "name": "test-caret-versions",
+  "engines": {
+    "node": "^18.0.0"
+  }
+}

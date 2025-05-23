@@ -1,0 +1,6 @@
+{
+  "name": "test-or-versions",
+  "engines": {
+    "node": ">=16 || >=18"
+  }
+}

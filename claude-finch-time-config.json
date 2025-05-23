@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "time": {
-      "command": "finch-mcp",
-      "args": ["run", "test-mcp-time:latest"],
-      "trusted": true
-    }
-  }
-}

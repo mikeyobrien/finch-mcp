@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/mobrienv/Code/finch-mcp/test-files"],
-      "trusted": true
-    }
-  }
-}

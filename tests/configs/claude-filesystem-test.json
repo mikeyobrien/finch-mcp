@@ -1,0 +1,13 @@
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "command": "/Users/mobrienv/Code/finch-mcp/target/debug/finch-mcp-stdio",
+        "args": [
+          "-v", "/Users/mobrienv/Code/finch-mcp:/workspace",
+          "npx @modelcontextprotocol/server-filesystem /workspace"
+        ]
+      }
+    }
+  }
+}

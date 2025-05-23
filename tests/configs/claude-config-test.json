@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "servers": {
+      "time": {
+        "command": "/Users/mobrienv/Code/finch-mcp/target/debug/finch-mcp-stdio",
+        "args": ["uvx", "mcp-server-time", "--local-timezone", "America/New_York"]
+      }
+    }
+  }
+}

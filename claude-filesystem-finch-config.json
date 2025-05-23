@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "finch-mcp",
-      "args": ["run", "test-mcp-filesystem:latest", "--stdio", "-v", "/Users/mobrienv/Code/finch-mcp/test-files:/projects"],
-      "trusted": true
-    }
-  }
-}

@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "servers": {
+      "time": {
+        "command": "/path/to/finch-mcp-stdio",
+        "args": ["uvx", "mcp-server-time", "--local-timezone", "UTC"]
+      }
+    }
+  }
+}

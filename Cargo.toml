@@ -1,0 +1,48 @@
+[package]
+name = "finch-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "A tool for running MCP servers using Finch containers"
+authors = ["Finch MCP Team"]
+license = "MIT"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35.1", features = ["full"] }
+
+# CLI argument parsing
+clap = { version = "4.4.18", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0.79"
+thiserror = "1.0.57"
+
+# Utilities
+console = "0.15.8"          # Terminal utilities
+indicatif = "0.17.8"        # Progress indicators
+log = "0.4.20"              # Logging
+env_logger = "0.11.0"       # Logging implementation
+chrono = { version = "0.4.31", features = ["serde"] } # Date and time handling for logs
+serde = { version = "1.0.196", features = ["derive"] } # Serialization
+serde_json = "1.0.114"      # JSON handling
+serde_yaml = "0.9"          # YAML handling
+toml = "0.8"                # TOML handling
+tempfile = "3.10.0"         # Temporary file handling
+uuid = { version = "1.6.1", features = ["v4"] } # For generating unique IDs
+sha2 = "0.10.8"             # Cryptographic hashing for content comparison
+crossbeam-channel = "0.5"   # Channel for thread communication
+
+[dev-dependencies]
+# Testing tools
+mockall = "0.12.1"          # Mocking for tests
+tempfile = "3.10.0"         # Temporary file handling
+test-context = "0.1.4"      # Test fixtures
+futures = "0.3.30"          # Futures utilities for tests
+
+[[bin]]
+name = "finch-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "finch_mcp"
+path = "src/lib.rs"
