@@ -13,10 +13,12 @@ pub mod utils {
     pub mod git_repository;
     pub mod progress;
     pub mod project_detector;
+    pub mod build_deps;
 }
 pub mod core {
     pub mod auto_containerize;
     pub mod git_containerize;
+    pub mod finch_config;
 }
 pub mod cache;
 pub mod logging;

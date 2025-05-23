@@ -1,0 +1,15 @@
+# Example .finch-mcp configuration for a TypeScript project
+# Place this file in your project root as .finch-mcp or .finch-mcp.yaml
+
+dependencies:
+  # Install all dependencies including devDependencies
+  # This is the simplest solution for TypeScript projects
+  installAll: true
+
+# Alternative: If you want to keep the image smaller but still build TypeScript
+# dependencies:
+#   # Install specific build tools globally
+#   preInstall:
+#     - "npm install -g typescript"
+#   # Then install only production dependencies
+#   installCommand: "npm install --production"

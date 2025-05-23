@@ -11,6 +11,7 @@ use crate::utils::progress::run_build_with_progress;
 use crate::finch::client::{FinchClient, StdioRunOptions};
 use crate::cache::{CacheManager, ContentHasher, hash_build_options};
 use crate::logging::LogManager;
+use crate::core::finch_config::FinchConfig;
 use crate::status;
 
 pub struct GitContainerizeOptions {
@@ -95,6 +96,12 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
         return Err(anyhow::anyhow!("Could not detect project type in repository"));
     }
     
+    // Load finch-mcp config if present
+    let finch_config = FinchConfig::load_from_dir(&repo_path)?;
+    if finch_config.is_some() {
+        info!("Found .finch-mcp configuration file");
+    }
+    
     // Generate smart, human-readable image name
     let identifier = CacheManager::extract_identifier(&options.repo_url);
     let image_name = cache_manager.generate_smart_image_name(
@@ -109,7 +116,7 @@ pub async fn git_containerize_and_run(options: GitContainerizeOptions) -> Result
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
     debug!("Generated Dockerfile:\n{}", dockerfile_content);
     
     // Write Dockerfile
@@ -294,7 +301,7 @@ pub async fn local_containerize_and_run(options: LocalContainerizeOptions) -> Re
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
     debug!("Generated Dockerfile:\n{}", dockerfile_content);
     
     // Write Dockerfile
@@ -456,7 +463,7 @@ pub async fn git_containerize_and_run_mcp(options: GitContainerizeOptions) -> Re
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
     fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
     
     // Copy repository contents to build context
@@ -598,7 +605,7 @@ pub async fn local_containerize_and_run_mcp(options: LocalContainerizeOptions) -
     let dockerfile_path = temp_dir.path().join("Dockerfile");
     
     // Generate Dockerfile content based on project type
-    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry)?;
+    let dockerfile_content = generate_dockerfile_for_project(&project_info, &options.args, options.forward_registry, None)?;
     fs::write(&dockerfile_path, dockerfile_content).context("Failed to write Dockerfile")?;
     
     // Create build context and copy local directory contents
@@ -719,7 +726,7 @@ fn get_registry_config(forward_registry: bool, project_type: &ProjectType) -> Ve
     config_lines
 }
 
-fn generate_dockerfile_for_project(project_info: &ProjectInfo, args: &[String], forward_registry: bool) -> Result<String> {
+fn generate_dockerfile_for_project(project_info: &ProjectInfo, args: &[String], forward_registry: bool, config: Option<&FinchConfig>) -> Result<String> {
     let registry_config = get_registry_config(forward_registry, &project_info.project_type);
     
     match project_info.project_type {
@@ -894,6 +901,18 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
             // Determine if this package has bin entries that need global installation
             let has_bin_command = project_info.bin_command.is_some();
             
+            // Determine install command based on config
+            let package_manager = project_info.package_manager.as_deref().unwrap_or("npm");
+            let install_command = if let Some(cfg) = config {
+                cfg.get_install_command(package_manager)
+            } else {
+                match package_manager {
+                    "pnpm" => "pnpm install --prod",
+                    "yarn" => "yarn install --production", 
+                    _ => "npm install --production",
+                }.to_string()
+            };
+            
             let entry_command = if let Some(ref run_cmd) = project_info.run_command {
                 run_cmd.clone()
             } else if let Some(ref bin_cmd) = project_info.bin_command {
@@ -923,16 +942,31 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
                 ("".to_string(), "".to_string())
             };
             
+            // Add pre-install commands if configured
+            let pre_install_section = if let Some(cfg) = config {
+                if !cfg.dependencies.pre_install.is_empty() {
+                    format!("# Pre-install commands\n{}\n\n", 
+                        cfg.dependencies.pre_install.iter()
+                            .map(|cmd| format!("RUN {}", cmd))
+                            .collect::<Vec<_>>()
+                            .join("\n"))
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            
             Ok(format!(
                 r#"FROM node:{}-slim
 
 WORKDIR /app
-{}
+{}{}
 # Copy project files
 COPY . .
 
 # Install dependencies
-RUN npm install --production
+RUN {}
 
 {}{}# Set environment variables for MCP
 ENV MCP_ENABLED=true
@@ -943,6 +977,8 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
 "#,
                 node_version,
                 registry_section,
+                pre_install_section,
+                install_command,
                 build_steps,
                 install_steps,
                 entry_command
@@ -1105,7 +1141,7 @@ mod tests {
             package_manager: None,
         };
         
-        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
+        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false, None).unwrap();
         assert!(dockerfile.contains("FROM python:3.11-slim"));
         assert!(dockerfile.contains("RUN pip install poetry"));
         assert!(dockerfile.contains("poetry run test-server"));
@@ -1126,7 +1162,7 @@ mod tests {
             package_manager: None,
         };
         
-        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
+        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false, None).unwrap();
         assert!(dockerfile.contains("FROM node:20-slim"));
         assert!(dockerfile.contains("RUN npm install --production"));
         assert!(dockerfile.contains("node index.js"));
@@ -1147,7 +1183,7 @@ mod tests {
             package_manager: None,
         };
         
-        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
+        let dockerfile = generate_dockerfile_for_project(&project_info, &[], false, None).unwrap();
         assert!(dockerfile.contains("FROM node:18-slim"));
         assert!(dockerfile.contains("RUN npm install --production"));
         assert!(dockerfile.contains("npm run build"));

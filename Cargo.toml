@@ -25,6 +25,8 @@ env_logger = "0.11.0"       # Logging implementation
 chrono = { version = "0.4.31", features = ["serde"] } # Date and time handling for logs
 serde = { version = "1.0.196", features = ["derive"] } # Serialization
 serde_json = "1.0.114"      # JSON handling
+serde_yaml = "0.9"          # YAML handling
+toml = "0.8"                # TOML handling
 tempfile = "3.10.0"         # Temporary file handling
 uuid = { version = "1.6.1", features = ["v4"] } # For generating unique IDs
 sha2 = "0.10.8"             # Cryptographic hashing for content comparison
