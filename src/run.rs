@@ -5,6 +5,7 @@ use std::path::Path;
 use tokio::signal::ctrl_c;
 
 use crate::finch::client::{FinchClient, StdioRunOptions};
+use crate::{status, output};
 
 /// Options for running an MCP server container in STDIO mode
 #[derive(Debug, Clone)]
@@ -27,14 +28,21 @@ struct Spinner {
 impl Spinner {
     fn new(message: &str) -> Self {
         let pb = ProgressBar::new_spinner();
-        pb.set_style(
-            ProgressStyle::default_spinner()
-                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-                .template("{spinner} {msg}")
-                .unwrap(),
-        );
+        
+        // Disable spinner in quiet mode (MCP_STDIO)
+        if output::is_quiet_mode() {
+            pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        } else {
+            pb.set_style(
+                ProgressStyle::default_spinner()
+                    .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                    .template("{spinner} {msg}")
+                    .unwrap(),
+            );
+            pb.enable_steady_tick(std::time::Duration::from_millis(80));
+        }
+        
         pb.set_message(message.to_string());
-        pb.enable_steady_tick(std::time::Duration::from_millis(80));
         
         Self { progress: pb }
     }
@@ -65,7 +73,9 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
     info!("Running MCP server from image: {}", options.image_name);
     
     spinner.succeed("Starting MCP server in STDIO mode...");
-    eprintln!("Connecting to MCP Server...");
+    if !output::is_quiet_mode() {
+        eprintln!("Connecting to MCP Server...");
+    }
     
     // Prepare run options
     let run_options = StdioRunOptions {
@@ -85,7 +95,9 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
             return;
         }
         
-        eprintln!("\nReceived interrupt signal, shutting down...");
+        if !output::is_quiet_mode() {
+            eprintln!("\nReceived interrupt signal, shutting down...");
+        }
         let _ = tx.send(());
     });
     
@@ -106,7 +118,9 @@ pub async fn run_stdio_container(options: RunOptions) -> Result<()> {
             // Ctrl+C received
             // The container will be terminated automatically because the process
             // is terminating and the stdio streams will be closed
-            eprintln!("MCP server container terminated");
+            if !output::is_quiet_mode() {
+                eprintln!("MCP server container terminated");
+            }
             Ok(())
         }
     }

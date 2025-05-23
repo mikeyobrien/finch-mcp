@@ -3,6 +3,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 use log::{info, warn, debug};
 use console::style;
+use crate::{status, output};
 
 /// Options for running a container in STDIO mode
 #[derive(Debug, Clone)]
@@ -88,20 +89,24 @@ impl FinchClient {
     
     /// Initialize Finch VM for first-time users
     pub async fn initialize_vm(&self) -> Result<()> {
-        info!("🚀 Initializing Finch VM for first-time use...");
-        info!("This may take a few minutes to download and set up the VM.");
+        if !output::is_quiet_mode() {
+            info!("🚀 Initializing Finch VM for first-time use...");
+            info!("This may take a few minutes to download and set up the VM.");
+        }
         
         let mut child = Command::new("finch")
             .args(["vm", "init"])
-            .stdin(Stdio::inherit())
-            .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
+            .stdin(Stdio::null())
+            .stdout(if output::is_quiet_mode() { Stdio::null() } else { Stdio::inherit() })
+            .stderr(if output::is_quiet_mode() { Stdio::null() } else { Stdio::inherit() })
             .spawn()?;
             
         let status = child.wait().await?;
         
         if status.success() {
-            info!("✅ Finch VM initialized successfully!");
+            if !output::is_quiet_mode() {
+                info!("✅ Finch VM initialized successfully!");
+            }
             Ok(())
         } else {
             Err(anyhow::anyhow!("Failed to initialize Finch VM: exit code {}", status))
@@ -157,17 +162,21 @@ impl FinchClient {
         }
         
         // Try to start VM
-        info!("🔄 Starting Finch VM...");
+        if !output::is_quiet_mode() {
+            info!("🔄 Starting Finch VM...");
+        }
         let mut start_child = Command::new("finch")
             .args(["vm", "start"])
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
+            .stderr(if output::is_quiet_mode() { Stdio::null() } else { Stdio::inherit() })
             .spawn()?;
             
         let start_status = start_child.wait().await?;
         
         if start_status.success() {
-            info!("✅ Finch VM started successfully");
+            if !output::is_quiet_mode() {
+                info!("✅ Finch VM started successfully");
+            }
             Ok(true)
         } else {
             Err(anyhow::anyhow!("Failed to start Finch VM: exit code {}", start_status))
@@ -229,11 +238,11 @@ impl FinchClient {
     
     /// List finch-mcp containers and images
     pub async fn list_resources(&self, show_all: bool) -> Result<()> {
-        println!("\n{} Finch-MCP Resources", style("📋").blue().bold());
-        println!("{}", "=".repeat(50));
+        status!("\n{} Finch-MCP Resources", style("📋").blue().bold());
+        status!("{}", "=".repeat(50));
         
         // List containers
-        println!("\n{} Containers:", style("🐳").cyan());
+        status!("\n{} Containers:", style("🐳").cyan());
         let container_args = if show_all {
             vec!["ps", "-a", "--filter", "name=mcp-", "--format", "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.CreatedAt}}"]
         } else {
@@ -248,16 +257,16 @@ impl FinchClient {
         if container_output.status.success() {
             let output = String::from_utf8_lossy(&container_output.stdout);
             if output.trim().is_empty() || !output.contains("mcp-") {
-                println!("  {}", style("No finch-mcp containers found").dim());
+                status!("  {}", style("No finch-mcp containers found").dim());
             } else {
                 print!("{}", output);
             }
         } else {
-            println!("  {}", style("Error listing containers").red());
+            status!("  {}", style("Error listing containers").red());
         }
         
         // List images
-        println!("\n{} Images:", style("💿").green());
+        status!("\n{} Images:", style("💿").green());
         let image_output = Command::new("finch")
             .args(["images", "--filter", "reference=mcp-*", "--format", "table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}\\t{{.CreatedAt}}"])
             .output()
@@ -266,27 +275,27 @@ impl FinchClient {
         if image_output.status.success() {
             let output = String::from_utf8_lossy(&image_output.stdout);
             if output.trim().is_empty() || !output.contains("mcp-") {
-                println!("  {}", style("No finch-mcp images found").dim());
+                status!("  {}", style("No finch-mcp images found").dim());
             } else {
                 print!("{}", output);
             }
         } else {
-            println!("  {}", style("Error listing images").red());
+            status!("  {}", style("Error listing images").red());
         }
         
-        println!();
+        status!();
         Ok(())
     }
     
     /// Cleanup finch-mcp containers and images
     pub async fn cleanup_resources(&self, cleanup_all: bool, cleanup_containers: bool, cleanup_images: bool, force: bool) -> Result<()> {
-        println!("\n{} Cleaning up Finch-MCP resources...", style("🧹").yellow().bold());
+        status!("\n{} Cleaning up Finch-MCP resources...", style("🧹").yellow().bold());
         
         let mut cleaned_something = false;
         
         // Cleanup containers
         if cleanup_all || cleanup_containers {
-            println!("\n{} Removing containers...", style("🐳").cyan());
+            status!("\n{} Removing containers...", style("🐳").cyan());
             
             // Get list of finch-mcp containers
             let container_list = Command::new("finch")
@@ -299,12 +308,12 @@ impl FinchClient {
                 let container_names: Vec<&str> = containers.lines().filter(|l| !l.trim().is_empty()).collect();
                 
                 if container_names.is_empty() {
-                    println!("  {}", style("No finch-mcp containers to remove").dim());
+                    status!("  {}", style("No finch-mcp containers to remove").dim());
                 } else {
                     if !force {
-                        println!("  Found {} containers to remove:", container_names.len());
+                        status!("  Found {} containers to remove:", container_names.len());
                         for name in &container_names {
-                            println!("    • {}", name);
+                            status!("    • {}", name);
                         }
                         print!("  Continue? [y/N]: ");
                         use std::io::{self, Write};
@@ -314,7 +323,7 @@ impl FinchClient {
                         io::stdin().read_line(&mut input).unwrap();
                         
                         if !input.trim().to_lowercase().starts_with('y') {
-                            println!("  Skipped container cleanup");
+                            status!("  Skipped container cleanup");
                             return Ok(());
                         }
                     }
@@ -326,10 +335,10 @@ impl FinchClient {
                             .await?;
                             
                         if remove_result.status.success() {
-                            println!("  {} Removed container: {}", style("✓").green(), container);
+                            status!("  {} Removed container: {}", style("✓").green(), container);
                             cleaned_something = true;
                         } else {
-                            println!("  {} Failed to remove container: {}", style("✗").red(), container);
+                            status!("  {} Failed to remove container: {}", style("✗").red(), container);
                         }
                     }
                 }
@@ -338,7 +347,7 @@ impl FinchClient {
         
         // Cleanup images
         if cleanup_all || cleanup_images {
-            println!("\n{} Removing images...", style("💿").green());
+            status!("\n{} Removing images...", style("💿").green());
             
             // Get list of finch-mcp images
             let image_list = Command::new("finch")
@@ -351,12 +360,12 @@ impl FinchClient {
                 let image_names: Vec<&str> = images.lines().filter(|l| !l.trim().is_empty()).collect();
                 
                 if image_names.is_empty() {
-                    println!("  {}", style("No finch-mcp images to remove").dim());
+                    status!("  {}", style("No finch-mcp images to remove").dim());
                 } else {
                     if !force {
-                        println!("  Found {} images to remove:", image_names.len());
+                        status!("  Found {} images to remove:", image_names.len());
                         for name in &image_names {
-                            println!("    • {}", name);
+                            status!("    • {}", name);
                         }
                         print!("  Continue? [y/N]: ");
                         use std::io::{self, Write};
@@ -366,7 +375,7 @@ impl FinchClient {
                         io::stdin().read_line(&mut input).unwrap();
                         
                         if !input.trim().to_lowercase().starts_with('y') {
-                            println!("  Skipped image cleanup");
+                            status!("  Skipped image cleanup");
                             return Ok(());
                         }
                     }
@@ -378,10 +387,10 @@ impl FinchClient {
                             .await?;
                             
                         if remove_result.status.success() {
-                            println!("  {} Removed image: {}", style("✓").green(), image);
+                            status!("  {} Removed image: {}", style("✓").green(), image);
                             cleaned_something = true;
                         } else {
-                            println!("  {} Failed to remove image: {}", style("✗").red(), image);
+                            status!("  {} Failed to remove image: {}", style("✗").red(), image);
                         }
                     }
                 }
@@ -389,9 +398,9 @@ impl FinchClient {
         }
         
         if cleaned_something {
-            println!("\n{} Cleanup completed!", style("✨").green().bold());
+            status!("\n{} Cleanup completed!", style("✨").green().bold());
         } else {
-            println!("\n{} Nothing to clean up", style("ℹ").blue());
+            status!("\n{} Nothing to clean up", style("ℹ").blue());
         }
         
         Ok(())
@@ -425,7 +434,7 @@ mod tests {
             // If Finch is available, the VM should typically be initialized
             // (unless this is a completely fresh install)
             let is_initialized = result.unwrap();
-            println!("VM initialized: {}", is_initialized);
+            status!("VM initialized: {}", is_initialized);
         }
     }
     
@@ -441,7 +450,7 @@ mod tests {
             // If successful, VM should be running
             if let Ok(is_running) = result {
                 assert!(is_running);
-                println!("VM running after ensure_vm_running: {}", is_running);
+                status!("VM running after ensure_vm_running: {}", is_running);
             }
         }
     }

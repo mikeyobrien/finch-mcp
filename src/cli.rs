@@ -143,17 +143,32 @@ impl Cli {
     pub fn parse_and_init() -> Self {
         let cli = Self::parse();
         
-        // Initialize logging based on verbosity
-        let log_level = match cli.verbose {
-            0 => log::LevelFilter::Info,
-            1 => log::LevelFilter::Debug,
-            _ => log::LevelFilter::Trace,
+        // Check if we're in MCP STDIO mode
+        let is_mcp_stdio = std::env::var("MCP_STDIO").is_ok();
+        
+        // Initialize logging based on verbosity and MCP mode
+        let log_level = if is_mcp_stdio {
+            // In MCP STDIO mode, suppress all logs except errors
+            log::LevelFilter::Error
+        } else {
+            match cli.verbose {
+                0 => log::LevelFilter::Info,
+                1 => log::LevelFilter::Debug,
+                _ => log::LevelFilter::Trace,
+            }
         };
         
-        env_logger::Builder::new()
-            .filter_level(log_level)
-            .format_timestamp(None)
-            .init();
+        // Configure logger
+        let mut builder = env_logger::Builder::new();
+        builder.filter_level(log_level)
+               .format_timestamp(None);
+        
+        // In MCP STDIO mode, redirect logs to stderr to avoid polluting stdout
+        if is_mcp_stdio {
+            builder.target(env_logger::Target::Stderr);
+        }
+        
+        builder.init();
             
         debug!("CLI arguments: {:?}", cli);
         

@@ -932,7 +932,7 @@ WORKDIR /app
 COPY . .
 
 # Install dependencies
-RUN npm install
+RUN npm install --production
 
 {}{}# Set environment variables for MCP
 ENV MCP_ENABLED=true
@@ -954,9 +954,9 @@ CMD ["sh", "-c", "{} ${{EXTRA_ARGS:+$EXTRA_ARGS}}"]
             let package_manager = project_info.package_manager.as_deref().unwrap_or("npm");
             
             let install_command = match package_manager {
-                "pnpm" => "pnpm install",
-                "yarn" => "yarn install",
-                _ => "npm install",
+                "pnpm" => "pnpm install --prod",
+                "yarn" => "yarn install --production",
+                _ => "npm install --production",
             };
             
             // Determine if this package has bin entries that need global installation
@@ -1128,7 +1128,7 @@ mod tests {
         
         let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
         assert!(dockerfile.contains("FROM node:20-slim"));
-        assert!(dockerfile.contains("RUN npm install"));
+        assert!(dockerfile.contains("RUN npm install --production"));
         assert!(dockerfile.contains("node index.js"));
     }
 
@@ -1149,7 +1149,7 @@ mod tests {
         
         let dockerfile = generate_dockerfile_for_project(&project_info, &[], false).unwrap();
         assert!(dockerfile.contains("FROM node:18-slim"));
-        assert!(dockerfile.contains("RUN npm install"));
+        assert!(dockerfile.contains("RUN npm install --production"));
         assert!(dockerfile.contains("npm run build"));
         assert!(dockerfile.contains("npm install -g ."));
         assert!(dockerfile.contains("my-server"));

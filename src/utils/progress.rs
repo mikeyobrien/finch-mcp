@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
+use crate::status;
 
 pub struct BuildProgress {
     pb: ProgressBar,
@@ -16,12 +17,18 @@ pub struct BuildProgress {
 impl BuildProgress {
     pub fn new(total_steps: u64) -> Self {
         let pb = ProgressBar::new(total_steps);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] {bar:40.cyan/blue} {pos:>3}/{len:3} {msg}")
-                .unwrap()
-                .progress_chars("##-")
-        );
+        
+        // Disable progress bar in quiet mode (MCP_STDIO)
+        if crate::output::is_quiet_mode() {
+            pb.set_draw_target(indicatif::ProgressDrawTarget::hidden());
+        } else {
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] {bar:40.cyan/blue} {pos:>3}/{len:3} {msg}")
+                    .unwrap()
+                    .progress_chars("##-")
+            );
+        }
         
         let start_time = Instant::now();
         let current_step = Arc::new(Mutex::new(String::new()));
@@ -125,7 +132,7 @@ pub fn run_build_with_progress(
     let mut progress = DockerBuildProgress::new();
     
     // Start the build process
-    println!("\n{} Containerizing {} project...", 
+    status!("\n{} Containerizing {} project...", 
         style("🚀").blue(), 
         style(project_type).cyan().bold()
     );
@@ -171,7 +178,7 @@ pub fn run_build_with_progress(
     let progress = progress_clone.lock().unwrap();
     if exit_status.success() {
         progress.finish_success(image_name);
-        println!("{} Container ready! Starting server...\n", style("✨").green());
+        status!("{} Container ready! Starting server...\n", style("✨").green());
     } else {
         let error_msg = if !error_output.trim().is_empty() {
             error_output.trim()

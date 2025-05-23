@@ -26,7 +26,19 @@
       "Bash(claude --version)",
       "WebFetch(domain:docs.anthropic.com)",
       "Bash(claude --mcp-config claude-time-config.json --print \"Use the time server to get the current time in Tokyo, Japan\")",
-      "Bash(claude --mcp-config claude-time-config.json --debug --print \"What is the current time in Tokyo? Use the time server to find out.\")"
+      "Bash(claude --mcp-config claude-time-config.json --debug --print \"What is the current time in Tokyo? Use the time server to find out.\")",
+      "Bash(ls:*)",
+      "Bash(MCP_STDIO=1 npx --yes @modelcontextprotocol/inspector --cli node --method tools/list -- ~/workplace/PowerUsersMCP/src/AmazonBuilderGenAIPowerUsersMCP/dist/src/bin/mcp-server.js)",
+      "Bash(finch images:*)",
+      "Bash(MCP_STDIO=1 npx --yes @modelcontextprotocol/inspector --cli finch-mcp --method tools/list -- run --direct mcp-local-nodejs-amazonbuildergenaipowerusersmcp-b2caa6a4:latest)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(sed:*)",
+      "Bash(./target/release/finch-mcp cache clear:*)",
+      "Bash(./target/release/finch-mcp cache list)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

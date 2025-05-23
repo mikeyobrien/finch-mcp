@@ -5,6 +5,7 @@ use finch_mcp::core::git_containerize::{git_containerize_and_run, local_containe
 use finch_mcp::finch::client::FinchClient;
 use finch_mcp::cache::CacheManager;
 use finch_mcp::logging::LogManager;
+use finch_mcp::{status, output};
 use log::{info, error};
 
 #[tokio::main]
@@ -63,8 +64,8 @@ async fn main() -> anyhow::Result<()> {
                 run_target(&cli).await
             } else {
                 // Non-direct, non-MCP mode - show banner and full setup
-                println!("Finch-MCP v{}", env!("CARGO_PKG_VERSION"));
-                println!("-------------------------------");
+                status!("Finch-MCP v{}", env!("CARGO_PKG_VERSION"));
+                status!("-------------------------------");
                 
                 let finch_client = FinchClient::new();
                 if !finch_client.is_finch_available().await? {
